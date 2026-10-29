@@ -2,8 +2,7 @@
 
 [English](README.md)
 
-**更好用、而且免费的 Grok Bot。** Bot27 是一个 macOS 应用，可以同时和多个 AI bot 聊天，每个 bot 有自己的角色、模型和记忆。
-
+**一个更好用、而且免费的 Grok Bot。** 
 ## 好在哪里
 
 - **免费**：应用本身免费。模型用你已有的 Claude 或 ChatGPT 登录，或者你自己的 xAI key。
