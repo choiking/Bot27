@@ -2,7 +2,12 @@
 
 [中文](README.zh-CN.md)
 
-**A better, free Grok Bot.** 
+**A better, free Grok Bot.**
+
+<p align="center"><img src="demo.gif" alt="Bot27 demo" width="360"></p>
+
+<p align="center"><a href="demo.mp4">Watch the full video</a></p>
+
 ## Why it's better
 
 - **Free.** The app costs nothing. Models run on your existing Claude or ChatGPT login, or your own xAI key.

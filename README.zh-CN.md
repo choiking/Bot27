@@ -2,7 +2,12 @@
 
 [English](README.md)
 
-**一个更好用、而且免费的 Grok Bot。** 
+**一个更好用、而且免费的 Grok Bot。**
+
+<p align="center"><img src="demo.gif" alt="Bot27 演示" width="360"></p>
+
+<p align="center"><a href="demo.mp4">看完整视频</a></p>
+
 ## 好在哪里
 
 - **免费**：应用本身免费。模型用你已有的 Claude 或 ChatGPT 登录，或者你自己的 xAI key。

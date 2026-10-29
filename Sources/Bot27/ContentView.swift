@@ -33,6 +33,11 @@ struct SidebarView: View {
         }
     }
 
+    /// BOT27_USER_NAME replaces the account name, e.g. for screen recordings.
+    private var userName: String {
+        ProcessInfo.processInfo.environment["BOT27_USER_NAME"] ?? NSFullUserName()
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
@@ -77,13 +82,13 @@ struct SidebarView: View {
 
             HStack(spacing: 10) {
                 HStack(spacing: 10) {
-                    Text(String(NSFullUserName().prefix(1)).uppercased())
+                    Text(String(userName.prefix(1)).uppercased())
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Theme.secondary)
                         .frame(width: 28, height: 28)
                         .background(Circle().fill(Theme.chip))
                         .overlay(Circle().stroke(Theme.border, lineWidth: 1))
-                    Text(NSFullUserName())
+                    Text(userName)
                         .font(.system(size: 14, weight: .medium))
                         .lineLimit(1)
                     Spacer(minLength: 0)

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Lightweight Markdown: fenced code, headings, lists, and inline styles.
+/// Lightweight Markdown: fenced code, headings, lists, tables, and inline styles.
 struct MarkdownView: View {
     let text: String
 
@@ -9,6 +9,7 @@ struct MarkdownView: View {
         case heading(String, level: Int)
         case item(String, marker: String)
         case code(String, lang: String)
+        case table(header: [String], rows: [[String]])
     }
 
     var body: some View {
@@ -42,6 +43,8 @@ struct MarkdownView: View {
                         .foregroundStyle(Theme.secondary)
                 case let .code(code, lang):
                     CodeBlock(code: code, lang: lang)
+                case let .table(header, rows):
+                    TableBlock(header: header, rows: rows)
                 }
             }
         }
@@ -61,13 +64,36 @@ struct MarkdownView: View {
         var code: [String]? = nil
         var lang = ""
 
+        var tableLines: [String] = []
+
         func flush() {
             if !paragraph.isEmpty { blocks.append(.paragraph(paragraph.joined(separator: "\n"))) }
             paragraph = []
         }
 
+        // A table is a header row, a |---| separator, then body rows. Anything else stays text.
+        func flushTable() {
+            defer { tableLines = [] }
+            guard tableLines.count >= 2, isSeparator(tableLines[1]) else {
+                paragraph += tableLines
+                return
+            }
+            flush()
+            let header = cells(tableLines[0])
+            let rows = tableLines.dropFirst(2).map { row in
+                let c = cells(row)
+                return Array((c + Array(repeating: "", count: max(0, header.count - c.count))).prefix(header.count))
+            }
+            blocks.append(.table(header: header, rows: rows))
+        }
+
         for raw in text.components(separatedBy: "\n") {
             let line = raw.trimmingCharacters(in: .whitespaces)
+            if code == nil, line.hasPrefix("|") {
+                tableLines.append(line)
+                continue
+            }
+            flushTable()
             if line.hasPrefix("```") {
                 if let body = code {
                     blocks.append(.code(body.joined(separator: "\n"), lang: lang))
@@ -96,9 +122,60 @@ struct MarkdownView: View {
                 paragraph.append(raw)
             }
         }
+        flushTable()
         if let body = code { blocks.append(.code(body.joined(separator: "\n"), lang: lang)) }
         flush()
         return blocks
+    }
+
+    static func isSeparator(_ line: String) -> Bool {
+        let c = cells(line)
+        return !c.isEmpty && c.allSatisfy { $0.wholeMatch(of: #/:?-+:?/#) != nil }
+    }
+
+    static func cells(_ line: String) -> [String] {
+        var s = Substring(line)
+        if s.hasPrefix("|") { s = s.dropFirst() }
+        if s.hasSuffix("|") { s = s.dropLast() }
+        return s.split(separator: "|", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+}
+
+struct TableBlock: View {
+    let header: [String]
+    let rows: [[String]]
+
+    var body: some View {
+        Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+            GridRow {
+                ForEach(Array(header.enumerated()), id: \.offset) { _, cell in
+                    self.cell(cell).fontWeight(.semibold)
+                }
+            }
+            .background(Color.black.opacity(0.04))
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                Divider().gridCellUnsizedAxes(.horizontal)
+                GridRow {
+                    ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
+                        self.cell(cell)
+                    }
+                }
+            }
+        }
+        .background(Theme.codeBg)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Theme.border, lineWidth: 1))
+    }
+
+    private func cell(_ s: String) -> some View {
+        Text(MarkdownView.inline(s))
+            .font(.system(size: 13.5))
+            .lineSpacing(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
