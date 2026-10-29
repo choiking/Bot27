@@ -1,5 +1,7 @@
 # Bot27
 
+[中文](README.zh-CN.md)
+
 A macOS app for chatting with several AI bots, each with its own role, model and memory.
 
 ## Features
