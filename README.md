@@ -2,13 +2,13 @@
 
 [中文](README.zh-CN.md)
 
-A macOS app for chatting with several AI bots, each with its own role, model and memory.
+**A better, free Grok Bot.** Bot27 is a macOS app for chatting with several AI bots, each with its own role, model and memory.
 
-## Why Bot27
+## Why it's better
 
 - **Free.** The app costs nothing. Models run on your existing Claude or ChatGPT login, or your own xAI key.
+- **Browser and computer use.** Bots can work in Chrome and on your Mac (with Claude models).
 - **Your data.** There's no Bot27 account or login, and chats and memory are stored only on your Mac.
-- **A better Grok Bot.** It adds browser use and computer use (with Claude models).
 - **Self-hosted.** It runs on your own computer, with no server.
 
 ## Features
