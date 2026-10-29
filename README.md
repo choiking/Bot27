@@ -11,8 +11,8 @@
 ## Why it's better
 
 - **Free.** The app costs nothing. Models run on your existing Claude or ChatGPT login, or your own xAI key.
-- **Browser and computer use.** Bots can work in Chrome and on your Mac (with Claude models).
-- **Your data.** There's no Bot27 account or login, and chats and memory are stored only on your Mac.
+- **Browser and computer use in your Local computer(GrokBot and Muse doesn't support).** Bots can work in Chrome and on your computer 
+- **Your data.** There's no Bot27 account or login, and chats and memory are stored only on your computer
 - **Self-hosted.** It runs on your own computer, with no server.
 
 ## Features
