@@ -160,8 +160,6 @@ struct BotRow: View {
         .contextMenu {
             Button(bot.isPinned ? "Unpin" : "Pin to Top") { store.togglePin(bot.id) }
             Button("Edit Bot…") { store.edit(bot.id) }
-            Button("New Session") { store.newSession(bot.id) }
-                .disabled(store.streaming.contains(bot.id))
             Button("Dream Now") { store.dream(bot.id) }
             Button("Clear Conversation") { store.clear(bot.id) }
             Divider()

@@ -54,11 +54,6 @@ struct Bot: Identifiable, Codable, Equatable {
     var summary: String? = nil
     /// The last message the summary covers.
     var summaryThrough: UUID? = nil
-    /// The "New session" notice the current session starts after; earlier messages stay on screen
-    /// but the bot no longer sees them.
-    var sessionStart: UUID? = nil
-    /// When the user last sent a message, for the session reset policy.
-    var lastActive: Date? = nil
     /// When the dreaming pass last ran for this bot.
     var lastDream: Date? = nil
 
@@ -69,29 +64,10 @@ struct Bot: Identifiable, Codable, Equatable {
         return i + 1
     }
 
-    /// Index of the current session's first message.
-    var sessionBegin: Int {
-        guard let start = sessionStart, let i = messages.firstIndex(where: { $0.id == start }) else { return 0 }
-        return i + 1
-    }
+    var hasSummary: Bool { summaryEnd > 0 }
 
-    var hasSummary: Bool { summaryEnd > sessionBegin }
-
-    /// The current session's messages.
-    var sessionMessages: [Message] { Array(messages[sessionBegin...]) }
-
-    /// The session's chat without notices or routine runs, which are sessions of their own.
-    var chatMessages: [Message] {
-        var kept: [Message] = [], inRoutine = false
-        for m in sessionMessages {
-            if m.role == .user && m.notice != RecallSpec.notice { inRoutine = m.job != nil }
-            if !inRoutine && m.notice == nil { kept.append(m) }
-        }
-        return kept
-    }
-
-    /// The session's messages the summary doesn't cover; the bot sees these word for word.
-    var recentMessages: [Message] { Array(messages[max(summaryEnd, sessionBegin)...]) }
+    /// The messages the summary doesn't cover; the bot sees these word for word.
+    var recentMessages: [Message] { Array(messages[summaryEnd...]) }
 
     var jobList: [BotJob] {
         get { jobs ?? [] }
@@ -335,21 +311,6 @@ final class ChatStore: ObservableObject {
         }
         // Each run is its own session: the bot sees only the job's prompt, not the chat.
         respond(in: botID, isolated: true)
-    }
-
-    /// Starts a fresh session: the bot stops seeing earlier messages and their summary, and the end of
-    /// the old one is saved as memory/YYYY-MM-DD-HHMM.md.
-    func newSession(_ id: UUID) {
-        guard let bot = bots.first(where: { $0.id == id }), !bot.sessionMessages.isEmpty else { return }
-        DailyNotes.saveSession(bot.chatMessages, for: id)
-        let notice = Message(role: .user, content: "", notice: "New session")
-        mutate(id) {
-            $0.messages.append(notice)
-            $0.sessionStart = notice.id
-            $0.summary = nil
-            $0.summaryThrough = nil
-        }
-        save()
     }
 
     /// Runs the dreaming pass for a bot in the background: lasting notes from its recent daily notes go
@@ -664,7 +625,6 @@ final class ChatStore: ObservableObject {
             $0.messages = []
             $0.summary = nil
             $0.summaryThrough = nil
-            $0.sessionStart = nil
         }
         save()
     }
@@ -702,25 +662,15 @@ final class ChatStore: ObservableObject {
 
     func send(_ option: String? = nil) {
         guard let id = selectedID, !streaming.contains(id) else { return }
-        var text = (option ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = (option ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
         let images = option == nil ? pendingImages : []
         guard !text.isEmpty || !images.isEmpty else { return }
         if option == nil {
             draft = ""
             pendingImages = []
         }
-        guard let bot = selectedBot else { return }
-        if let rest = SessionPolicy.command(in: text) {
-            newSession(id)
-            text = rest
-        } else if let last = bot.lastActive ?? bot.sessionMessages.last(where: { $0.job == nil })?.date,
-                  SessionPolicy.expired(lastActive: last) {
-            newSession(id)
-        }
-        guard !text.isEmpty || !images.isEmpty else { return }
         mutate(id) {
             $0.messages.append(Message(role: .user, content: text, images: images.isEmpty ? nil : images))
-            $0.lastActive = Date()
         }
         respond(in: id)
     }

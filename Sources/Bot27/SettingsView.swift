@@ -200,31 +200,15 @@ private struct PermissionRow: View {
 }
 
 struct SessionSettings: View {
-    @AppStorage("sessionReset") private var mode = SessionPolicy.Mode.off.rawValue
-    @AppStorage("sessionIdleMinutes") private var idleMinutes = SessionPolicy.defaultIdleMinutes
-    @AppStorage("sessionResetHour") private var hour = SessionPolicy.defaultHour
     @AppStorage("dreaming") private var dreaming = false
 
     var body: some View {
         Section {
-            Picker("Start a new session", selection: $mode) {
-                ForEach(SessionPolicy.Mode.allCases, id: \.rawValue) { Text($0.label).tag($0.rawValue) }
-            }
-            if mode == SessionPolicy.Mode.idle.rawValue {
-                Stepper("After \(idleMinutes) minutes idle", value: $idleMinutes, in: 15...1440, step: 15)
-            } else if mode == SessionPolicy.Mode.daily.rawValue {
-                Picker("At", selection: $hour) {
-                    ForEach(0..<24, id: \.self) { h in
-                        Text(Calendar.current.date(bySettingHour: h, minute: 0, second: 0, of: Date())!
-                            .formatted(date: .omitted, time: .shortened)).tag(h)
-                    }
-                }
-            }
             Toggle("Dream every night at 3:00", isOn: $dreaming)
         } header: {
-            Text("Sessions")
+            Text("Memory")
         } footer: {
-            Text("A new session starts only when you send /new or /reset, or when this rule says the last one expired, checked on your next message. Changing topic doesn't start one, and long chats are summarized instead. A reset saves the session's last 15 messages to the bot's memory/ folder; every session reads today's and yesterday's notes, and bots can search older ones. Routines run in sessions of their own, without MEMORY.md. Dreaming moves lasting daily notes into MEMORY.md.")
+            Text("Each bot keeps one ongoing chat; long chats are summarized instead of cut off. Every chat reads today's and yesterday's notes in the bot's memory/ folder, and bots can search older ones. Routines run in sessions of their own, without MEMORY.md. Dreaming moves lasting daily notes into MEMORY.md.")
                 .foregroundStyle(.secondary)
         }
     }

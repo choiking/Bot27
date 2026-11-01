@@ -143,7 +143,6 @@ struct MessageRow: View {
             Label(message.job ?? message.notice ?? "",
                   systemImage: message.notice == "Computer use on" ? "cursorarrow.rays"
                       : message.notice == "Browser use on" ? "globe"
-                      : message.notice == "New session" ? "arrow.counterclockwise"
                       : message.notice == RecallSpec.notice ? "magnifyingglass"
                       : message.notice != nil ? "link"
                       : message.jobIsRoutine == true ? "clock.arrow.circlepath" : "checklist")

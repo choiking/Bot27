@@ -23,8 +23,8 @@
   - `SOUL.md`: who the bot is.
   - `USER.md`: who you are.
   - `MEMORY.md`: things worth remembering.
-- **Daily notes.** Starting a new session saves the end of the old one to daily notes, which the bot can search.
-- **Sessions.** `/new` or `/reset` starts a fresh session. Long chats are summarized instead of cut off.
+- **Daily notes.** Notes in the bot's `memory/` folder: today's and yesterday's are read in every chat, and the bot can search older ones.
+- **One chat per bot.** Each bot keeps one ongoing chat. Long chats are summarized instead of cut off.
 - **Tasks and routines.** One-off or scheduled jobs. Routines run in sessions of their own.
 - **Connections** (Claude only). Gmail, Google Calendar and other claude.ai connectors. They are read-only, except that bots can write email drafts.
 - **Computer and browser use** (Claude only). Off by default, and turned on per bot.

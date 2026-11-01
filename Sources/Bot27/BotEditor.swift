@@ -1,22 +1,20 @@
 import SwiftUI
 
 struct BotEditor: View {
-    enum Tab: String, CaseIterable { case profile = "Profile", tasks = "Tasks", routines = "Routines", memory = "Files" }
+    enum Tab: String, CaseIterable { case profile = "Profile", tasks = "Tasks", routines = "Routines", memory = "Memory" }
 
     @EnvironmentObject var store: ChatStore
     @Environment(\.dismiss) private var dismiss
     @State var request: EditorRequest
     @State private var tab: Tab
-    /// The notes files as opened, and as edited here.
-    private let savedFiles: [MemoryFile: String]
-    @State private var files: [MemoryFile: String]
+    /// The notes files as opened; shown read-only.
+    private let files: [MemoryFile: String]
     @State private var file = MemoryFile.user
 
     init(request: EditorRequest) {
         _request = State(initialValue: request)
         _tab = State(initialValue: request.tab)
-        savedFiles = Dictionary(uniqueKeysWithValues: MemoryFile.allCases.map { ($0, MemoryStore.read(request.bot.id, $0)) })
-        _files = State(initialValue: savedFiles)
+        files = Dictionary(uniqueKeysWithValues: MemoryFile.allCases.map { ($0, MemoryStore.read(request.bot.id, $0)) })
     }
 
     private var canSave: Bool { !request.bot.name.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -75,17 +73,13 @@ struct BotEditor: View {
 
     private func save() {
         request.bot.name = request.bot.name.trimmingCharacters(in: .whitespaces)
-        // Only an edit made here is written, so notes the bot saved meanwhile aren't lost.
-        for file in MemoryFile.allCases where files[file] != savedFiles[file] {
-            MemoryStore.write(files[file] ?? "", for: request.bot.id, file)
-        }
         store.commit(request)
         dismiss()
     }
 
     private var memoryTab: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("This bot's own files; other bots can't see them. Every chat reads all three, and routines read all but MEMORY.md. The bot adds lines as you talk, and you can edit anything.")
+            Text("This bot's own files; other bots can't see them. Every chat reads all three, and routines read all but MEMORY.md. The bot adds lines as you talk; this view is read-only.")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -101,20 +95,16 @@ struct BotEditor: View {
                     .foregroundStyle(Theme.secondary)
                     .lineLimit(2)
             }
-            TextEditor(text: Binding(get: { files[file] ?? "" }, set: { files[file] = $0 }))
-                .font(.system(size: 13))
-                .scrollContentBackground(.hidden)
-                .frame(height: 270)
-                .whiteField(padding: 6)
-                .overlay(alignment: .topLeading) {
-                    if (files[file] ?? "").isEmpty {
-                        Text("Nothing yet. Tell the bot something about yourself, or write notes here like:\n- Prefers short answers")
-                            .font(.system(size: 13))
-                            .foregroundStyle(Theme.secondary.opacity(0.7))
-                            .padding(11)
-                            .allowsHitTesting(false)
-                    }
-                }
+            ScrollView {
+                let text = files[file] ?? ""
+                Text(text.isEmpty ? "Nothing yet. Tell the bot something about yourself and it adds it here." : text)
+                    .font(.system(size: 13))
+                    .foregroundStyle(text.isEmpty ? Theme.secondary.opacity(0.7) : Theme.text)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .frame(height: 262)
+            .whiteField()
             HStack {
                 Text("The folder also holds daily notes in memory/.")
                     .font(.system(size: 12))

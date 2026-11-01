@@ -386,66 +386,8 @@ enum Compaction {
     }
 }
 
-// MARK: - Sessions
-
-/// When a chat starts a fresh session, OpenClaw-style: only on /new or /reset, or when the reset
-/// policy says the last one expired, checked as the next message arrives. A topic change or a full
-/// context never starts one (a full context is compacted instead).
-enum SessionPolicy {
-    enum Mode: String, CaseIterable {
-        case off, idle, daily
-        var label: String {
-            switch self {
-            case .off: return "Never"
-            case .idle: return "After being idle"
-            case .daily: return "Daily"
-            }
-        }
-    }
-
-    static let commands = ["/new", "/reset"]
-    static let defaultIdleMinutes = 120
-    static let defaultHour = 4
-
-    static var mode: Mode { Mode(rawValue: UserDefaults.standard.string(forKey: "sessionReset") ?? "") ?? .off }
-    static var idleMinutes: Int {
-        let m = UserDefaults.standard.integer(forKey: "sessionIdleMinutes")
-        return m > 0 ? m : defaultIdleMinutes
-    }
-    static var hour: Int {
-        UserDefaults.standard.object(forKey: "sessionResetHour") as? Int ?? defaultHour
-    }
-
-    /// The text after /new or /reset (maybe empty), or nil if the message isn't one.
-    static func command(in text: String) -> String? {
-        for c in commands where text == c || text.hasPrefix(c + " ") || text.hasPrefix(c + "\n") {
-            return String(text.dropFirst(c.count)).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return nil
-    }
-
-    /// Whether a session last used at `lastActive` has expired by `now`.
-    static func expired(lastActive: Date, now: Date = Date()) -> Bool {
-        switch mode {
-        case .off: return false
-        case .idle: return now.timeIntervalSince(lastActive) > Double(idleMinutes) * 60
-        case .daily: return lastMark(hour: hour, now: now).map { lastActive < $0 } ?? false
-        }
-    }
-
-    /// The most recent time it was `hour` o'clock.
-    static func lastMark(hour: Int, now: Date = Date()) -> Date? {
-        let cal = Calendar.current
-        guard let mark = cal.date(bySettingHour: hour, minute: 0, second: 0, of: now) else { return nil }
-        return mark > now ? cal.date(byAdding: .day, value: -1, to: mark) : mark
-    }
-}
-
-/// Daily notes in memory/, raw logs by day as in OpenClaw. A reset saves the end of the old session as
-/// memory/YYYY-MM-DD-HHMM.md, and every session reads today's and yesterday's notes.
+/// Daily notes in memory/, raw logs by day as in OpenClaw. Every chat reads today's and yesterday's notes.
 enum DailyNotes {
-    /// Messages a reset saves, like OpenClaw's session-memory hook.
-    static let resetMessages = 15
     static let budget = 8_000
 
     static func folder(for bot: UUID) -> URL {
@@ -460,25 +402,7 @@ enum DailyNotes {
         return formatter.string(from: date)
     }
 
-    /// Saves the last messages of a session that's closing as memory/YYYY-MM-DD-HHMM.md.
-    static func saveSession(_ messages: [Message], for bot: UUID, at date: Date = Date()) {
-        let kept = messages.filter { $0.isError != true && (!$0.content.isEmpty || $0.images?.isEmpty == false) }
-            .suffix(resetMessages)
-        guard !kept.isEmpty else { return }
-        let lines = kept.map { m in
-            let images = m.images?.count ?? 0
-            return "**\(m.role == .user ? "User" : "Assistant"):**" + (images > 0 ? " [sent \(images) image(s)]" : "")
-                + " " + m.content
-        }
-        let folder = folder(for: bot)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let url = folder.appendingPathComponent(stamp(date, "yyyy-MM-dd-HHmm") + ".md")
-        var text = (try? String(contentsOf: url, encoding: .utf8)).map { $0 + "\n" } ?? ""
-        text += "# Session ended \(stamp(date, "yyyy-MM-dd HH:mm"))\n\n" + lines.joined(separator: "\n\n") + "\n"
-        try? Data(text.utf8).write(to: url, options: .atomic)
-    }
-
-    /// The notes files for one day: the day's own file and the sessions saved that day.
+    /// The notes files for one day: the day's own file and any others named for that day.
     static func files(for bot: UUID, on day: String) -> [String] {
         ((try? FileManager.default.contentsOfDirectory(atPath: folder(for: bot).path)) ?? [])
             .filter { $0 == day + ".md" || ($0.hasPrefix(day + "-") && $0.hasSuffix(".md")) }
@@ -516,7 +440,14 @@ enum Dreaming {
     /// Whether a bot that last dreamt at `last` is due for tonight's pass.
     static func due(last: Date?, now: Date = Date()) -> Bool {
         guard let last else { return true }
-        return SessionPolicy.lastMark(hour: hour, now: now).map { last < $0 } ?? false
+        return lastMark(now: now).map { last < $0 } ?? false
+    }
+
+    /// The most recent time it was `hour` o'clock.
+    static func lastMark(now: Date = Date()) -> Date? {
+        let cal = Calendar.current
+        guard let mark = cal.date(bySettingHour: hour, minute: 0, second: 0, of: now) else { return nil }
+        return mark > now ? cal.date(byAdding: .day, value: -1, to: mark) : mark
     }
 
     /// The daily notes since the last dream (or the past week), oldest first; nil when there are none.
