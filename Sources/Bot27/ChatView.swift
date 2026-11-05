@@ -11,6 +11,8 @@ struct ChatView: View {
             VStack(spacing: 0) {
                 ZStack(alignment: .top) {
                     Transcript(bot: bot)
+                        // Each conversation needs its own scroll position and lazy layout cache.
+                        .id(bot.id)
                     Button { store.edit(bot.id) } label: {
                         HStack(spacing: 8) {
                             BotAvatar(shape: bot.shape, color: bot.color, size: 22)
@@ -100,18 +102,19 @@ struct Transcript: View {
                                 .help(bot.summary ?? "")
                         }
                     }
+                    Color.clear.frame(height: 1).id("bottom")
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 60)
                 .padding(.bottom, 16)
                 .frame(maxWidth: 940)
                 .frame(maxWidth: .infinity)
-                Color.clear.frame(height: 1).id("bottom")
             }
-            .onChange(of: bot.messages.last?.content, initial: true) {
+            .defaultScrollAnchor(.bottom)
+            .onChange(of: bot.messages.last?.id) {
                 proxy.scrollTo("bottom", anchor: .bottom)
             }
-            .onChange(of: bot.id) {
+            .onChange(of: bot.messages.last?.content) {
                 proxy.scrollTo("bottom", anchor: .bottom)
             }
         }
