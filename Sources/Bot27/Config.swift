@@ -11,6 +11,8 @@ struct AppConfig {
             case .xai: return "xAI API"
             }
         }
+        /// Computer and browser use run through the claude and codex CLIs.
+        var canUseComputer: Bool { self != .xai }
     }
 
     static let claudeModels: [(id: String, name: String)] = [

@@ -4,8 +4,8 @@ import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
 
-/// `Bot27 --computer-mcp`: a small MCP server (JSON-RPC over stdio) that lets Claude see the main
-/// display and use the mouse and keyboard. Bot27 hands it to the claude CLI for bots with computer
+/// `Bot27 --computer-mcp`: a small MCP server (JSON-RPC over stdio) that lets Claude and GPT see the main
+/// display and use the mouse and keyboard. Bot27 hands it to the claude or codex CLI for bots with computer
 /// use turned on. The actions themselves run in the Bot27 app (see `ComputerRelay`), because
 /// macOS doesn't count this grandchild process as Bot27 for Screen Recording and Accessibility.
 enum ComputerMCP {

@@ -192,15 +192,15 @@ struct BotEditor: View {
     }
 }
 
-/// Per-bot switch for browser use through the Claude in Chrome extension.
+/// Browser control uses the runtime belonging to the selected model provider.
 struct BrowserUsePicker: View {
     @Binding var bot: Bot
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             FieldLabel("Browser use")
-            if bot.modelChoice.provider != .claude {
-                Text("Browser use works with Claude models.")
+            if !bot.modelChoice.provider.canUseComputer {
+                Text("Browser use works with Claude and GPT models.")
                     .font(.system(size: 12.5))
                     .foregroundStyle(Theme.secondary)
             } else {
@@ -212,15 +212,24 @@ struct BrowserUsePicker: View {
                 .toggleStyle(.switch)
                 .controlSize(.mini)
                 .whiteField()
-                if bot.browserUse == true && !BrowserUse.isInstalled {
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.warning)
-                        Text("Needs Google Chrome with the Claude in Chrome extension.")
-                        Link("Get it", destination: URL(string: "https://claude.ai/chrome")!)
+                if bot.modelChoice.provider == .gpt {
+                    Text("Uses OpenAI Computer Use from the ChatGPT desktop app, with Chrome window control as a fallback. Your existing Chrome logins are reused; Claude Code is not required.")
+                        .font(.system(size: 11.5)).foregroundStyle(Theme.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if bot.browserUse == true && NativeBrowser.locate() == nil {
+                        Label("Open ChatGPT and enable Computer Use to install its runtime.", systemImage: "exclamationmark.triangle.fill")
+                            .font(.system(size: 11.5)).foregroundStyle(Theme.warning)
                     }
-                    .font(.system(size: 11.5))
+                } else {
+                    if bot.browserUse == true && !BrowserUse.isInstalled {
+                        Link("Install Claude in Chrome", destination: URL(string: "https://claude.ai/chrome")!)
+                            .font(.system(size: 11.5))
+                    }
+                    Text("Uses Claude in Chrome. Sign in to the extension and Claude Code with the same account and organization.")
+                        .font(.system(size: 11.5)).foregroundStyle(Theme.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Text("Off by default. Uses your signed-in Chrome, in its own tab. It won't run scripts, upload files, enter passwords or payment details, and asks before sending or posting anything.")
+                Text("Off by default. Uses your signed-in Chrome. The Stop bar ends the current run; the bot asks before sending or posting unless already authorized.")
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -238,8 +247,8 @@ struct ComputerUsePicker: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             FieldLabel("Computer use")
-            if bot.modelChoice.provider != .claude {
-                Text("Computer use works with Claude models.")
+            if !bot.modelChoice.provider.canUseComputer {
+                Text("Computer use works with Claude and GPT models.")
                     .font(.system(size: 12.5))
                     .foregroundStyle(Theme.secondary)
             } else {

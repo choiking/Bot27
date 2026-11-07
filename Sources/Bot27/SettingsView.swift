@@ -59,10 +59,18 @@ struct SettingsView: View {
                             .foregroundStyle(.red)
                             .font(.system(size: 12))
                     }
+                    if let runtime = NativeBrowser.locate() {
+                        Label("OpenAI browser runtime available", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green).font(.system(size: 12))
+                        Text(runtime.manifest.path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    } else {
+                        Text("For GPT browser use, open ChatGPT and enable Computer Use. Claude Code is not required.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 } header: {
                     Text("GPT")
                 } footer: {
-                    Text("Replies come from the Codex CLI on this Mac, using your ChatGPT login. Run `codex login` in Terminal once to sign in. GPT replies arrive whole rather than word by word.")
+                    Text("Replies come from the Codex CLI on this Mac, using your ChatGPT login. Run `codex login` in Terminal once to sign in. For Gmail, connect it in ChatGPT using that same account, then refresh Connections in the bot's settings and turn Gmail on. GPT replies arrive whole rather than word by word.")
                         .foregroundStyle(.secondary)
                 }
             } else {

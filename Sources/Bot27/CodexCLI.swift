@@ -5,17 +5,18 @@ import Darwin
 /// `codex exec --json` reports whole messages rather than token deltas.
 struct CodexCLI {
     var config: AppConfig
+    var connectors: [Connector] = []
     /// Called with a short description of the tool in use, or "" once text resumes.
     var onActivity: ((String) -> Void)? = nil
     /// Lets the bot see the screen and use the mouse and keyboard, via `Bot27 --computer-mcp`.
     var computerUse = false
     var onComputer: (() -> Void)? = nil
-    /// Lets the bot drive the user's Chrome, via the claude CLI's Claude in Chrome server.
+    /// Chrome control via the installed OpenAI cua_repl runtime, including its native window fallback.
     var browserUse = false
     var onBrowser: (() -> Void)? = nil
 
-    /// Codex's name for the Claude in Chrome server; tools are reported as server + tool.
-    private static let browserServer = "claude_in_chrome"
+    /// MCP tool events identify the server and tool separately.
+    private static let browserServer = NativeBrowser.server
 
     static let searchPaths = [
         "/opt/homebrew/bin/codex",
@@ -46,6 +47,15 @@ struct CodexCLI {
         return (try? JSONDecoder().decode(Wrapped.self, from: Data(message.utf8)))?.error.message ?? message
     }
 
+    /// Foundation launches the CLI in its own process group on macOS. Stop that group
+    /// as well as the CLI so a cua_repl child cannot keep controlling Chrome after Stop.
+    private static func terminate(_ process: Process) {
+        guard process.isRunning else { return }
+        let pid = process.processIdentifier
+        if getpgid(pid) == pid { _ = kill(-pid, SIGTERM) }
+        else { process.terminate() }
+    }
+
     /// TOML accepts JSON string escapes except the optional escaped slash (`\/`).
     private static func toml(_ value: String) -> String {
         let encoder = JSONEncoder()
@@ -55,21 +65,31 @@ struct CodexCLI {
 
     /// `-c` overrides that add Bot27's MCP servers, with their tool calls approved up front
     /// (`codex exec` has no one to ask).
-    private func mcpArgs() -> [String] {
+    private func mcpArgs() throws -> [String] {
         var servers: [(name: String, command: String, args: [String], extra: [String])] = []
         if computerUse, let exe = Bundle.main.executablePath {
             let relay = ComputerRelay.shared
             servers.append((ComputerMCP.server, exe, ["--computer-mcp"],
                             ["env={BOT27_RELAY_SOCKET=\(Self.toml(relay.path)), BOT27_RELAY_TOKEN=\(Self.toml(relay.token))}"]))
         }
-        if browserUse, let claude = ClaudeCLI.locate(custom: config.claudePath) {
-            let tools = BrowserUse.allowedTools.map { Self.toml(String($0.dropFirst(BrowserUse.prefix.count))) }
-            servers.append((Self.browserServer, claude, ["--claude-in-chrome-mcp"],
-                            ["enabled_tools=[\(tools.joined(separator: ", "))]", "tool_timeout_sec=120"]))
+        if browserUse {
+            guard let installed = NativeBrowser.locate() else {
+                throw ClaudeError.failed(NativeBrowser.missingMessage)
+            }
+            let c = installed.configuration
+            let env = (c.env ?? [:]).sorted { $0.key < $1.key }
+                .map { "\(Self.toml($0.key))=\(Self.toml($0.value))" }.joined(separator: ", ")
+            let forwarded = (c.env_vars ?? []).map(Self.toml).joined(separator: ", ")
+            let enabled = NativeBrowser.tools.filter { c.enabled_tools?.contains($0) != false }
+                .map(Self.toml).joined(separator: ", ")
+            servers.append((Self.browserServer, c.command, c.args ?? [],
+                            ["env={\(env)}", "env_vars=[\(forwarded)]", "enabled_tools=[\(enabled)]",
+                             "startup_timeout_sec=\(Int(c.startup_timeout_sec ?? 120))", "tool_timeout_sec=120"]))
         }
         return servers.flatMap { server in
             (["command=\(Self.toml(server.command))",
               "args=[\(server.args.map(Self.toml).joined(separator: ", "))]",
+              "enabled=true", "required=true", "startup_timeout_sec=30",
               "default_tools_approval_mode=\"approve\""] + server.extra)
                 .flatMap { ["-c", "mcp_servers.\(server.name).\($0)"] }
         }
@@ -82,6 +102,12 @@ struct CodexCLI {
                     "Couldn't find the codex CLI. Install Codex and sign in with ChatGPT, or set its path in Settings."))
                 return
             }
+            let toolArgs: [String]
+            do { toolArgs = try mcpArgs() }
+            catch {
+                continuation.finish(throwing: error)
+                return
+            }
 
             let workDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("Bot27/codex", isDirectory: true)
@@ -91,9 +117,15 @@ struct CodexCLI {
             process.executableURL = URL(fileURLWithPath: path)
             process.currentDirectoryURL = workDir
             let conversation = ClaudeCLI.prompt(for: messages)
-            process.arguments = ["exec", "--json", "--skip-git-repo-check", "--ephemeral", "-s", "read-only",
+            // Load only the opted-in servers below. cua_repl is injected explicitly from the
+            // installed OpenAI plugin, so no unrelated personal plugins/MCP servers are inherited.
+            let disabledFeatures = ["shell_tool", "plugins", "computer_use", "browser_use",
+                                    "browser_use_external", "in_app_browser"]
+            process.arguments = ["exec", "--json", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "-s", "read-only",
                                  "-m", config.gptModel, "-c", "model_reasoning_effort=low"]
-                + mcpArgs()
+                + disabledFeatures.flatMap { ["-c", "features.\($0)=false"] }
+                + CodexConnectors.arguments(for: connectors)
+                + toolArgs
                 + conversation.images.map { "--image=" + ImageStore.url($0).path }
                 + ["-"]
             process.environment = CLIEnvironment.make()
@@ -103,7 +135,10 @@ struct CodexCLI {
             process.standardOutput = stdout
             process.standardError = stderr
 
-            let prompt = "<instructions>\n\(config.systemPrompt)\nYou are chatting, not coding: don't run commands or touch files.\n</instructions>\n\n"
+            let toolHint = computerUse || browserUse
+                ? " Use the enabled Bot27 computer or browser tools when needed, following the rules above."
+                : ""
+            let prompt = "<instructions>\n\(config.systemPrompt)\nYou are chatting, not coding: don't run shell commands or edit files through coding tools.\(toolHint)\n</instructions>\n\n"
                 + (conversation.images.isEmpty ? "" : "Images 1–\(conversation.images.count) are attached in order.\n\n")
                 + conversation.text
 
@@ -114,7 +149,9 @@ struct CodexCLI {
                     guard fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) != -1 else {
                         throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
                     }
+                    try Task.checkCancellation()
                     try process.run()
+                    if Task.isCancelled { Self.terminate(process) }
                     // Drain stderr concurrently: a full pipe can otherwise stall the CLI.
                     let diagnostics = Task.detached { () -> String in
                         var tail = Data()
@@ -143,8 +180,10 @@ struct CodexCLI {
                            let server = event.item?.server, let tool = event.item?.tool {
                             if server == ComputerMCP.server { onComputer?() }
                             if server == Self.browserServer { onBrowser?() }
-                            let name = server == Self.browserServer ? BrowserUse.prefix + tool : "mcp__\(server)__\(tool)"
-                            onActivity?(Connector.describe(name, in: []))
+                            // Hosted Apps report raw names such as `gmail.search_emails`.
+                            let action = server == "codex_apps" ? tool.replacingOccurrences(of: ".", with: "__") : tool
+                            let name = "mcp__\(server)__\(action)"
+                            onActivity?(Connector.describe(name, in: connectors))
                         } else if event.type == "item.completed", event.item?.type == "agent_message",
                            let text = event.item?.text, !text.isEmpty {
                             onActivity?("")
@@ -173,7 +212,7 @@ struct CodexCLI {
             }
             continuation.onTermination = { _ in
                 task.cancel()
-                if process.isRunning { process.terminate() }
+                Self.terminate(process)
             }
         }
     }

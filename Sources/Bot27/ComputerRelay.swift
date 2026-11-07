@@ -1,7 +1,7 @@
 import Foundation
 
 /// Runs computer-use actions inside the Bot27 app, where the user granted Screen Recording and
-/// Accessibility. The `--computer-mcp` process (started by the claude CLI) only forwards each tool
+/// Accessibility. The `--computer-mcp` process (started by the claude or codex CLI) only forwards each tool
 /// call here over a Unix socket in the user's Application Support folder.
 final class ComputerRelay: @unchecked Sendable {
     static let shared = ComputerRelay()

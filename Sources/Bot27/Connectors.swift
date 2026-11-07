@@ -1,11 +1,15 @@
 import Foundation
 
-/// An MCP server the claude CLI can reach, such as a claude.ai connector (Gmail, Notion…).
+/// A service available through one provider's signed-in account.
 struct Connector: Identifiable, Codable, Equatable {
     var id: String       // tool prefix, e.g. "claude_ai_Gmail"
     var name: String     // "Gmail"
     var status: String   // "connected", "needs-auth", …
     var tools: [String]  // full tool names, e.g. "mcp__claude_ai_Gmail__search_threads"
+    /// Absent in older catalogs and for Claude connectors.
+    var codexAppID: String? = nil
+
+    var provider: AppConfig.Provider { codexAppID == nil ? .claude : .gpt }
 
     var isConnected: Bool { status == "connected" }
 
@@ -32,7 +36,9 @@ struct Connector: Identifiable, Codable, Equatable {
         return words.prefix(2).contains(where: readVerbs.contains) ? .read : .write
     }
 
-    var allowedTools: [String] { tools.filter { Self.access($0) != .write } }
+    var allowedTools: [String] {
+        tools.filter { codexAppID == nil ? Self.access($0) != .write : CodexConnectors.allowedTools.contains(Self.shortName($0)) }
+    }
     var blockedTools: [String] { tools.filter { Self.access($0) == .write } }
     var canDraft: Bool { tools.contains { Self.access($0) == .draft } }
 
@@ -40,7 +46,8 @@ struct Connector: Identifiable, Codable, Equatable {
     static func describe(_ tool: String, in connectors: [Connector]) -> String {
         let action = shortName(tool).replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ")
         let owner = tool.hasPrefix("mcp__\(ComputerMCP.server)__") ? "Computer"
-            : tool.hasPrefix(BrowserUse.prefix) ? "Browser"
+            : (tool.hasPrefix(BrowserUse.prefix) || tool.hasPrefix(NativeBrowser.prefix)) ? "Browser"
+            : tool.hasPrefix(CodexConnectors.toolPrefix) ? "Gmail"
             : connectors.first { tool.hasPrefix("mcp__\($0.id)__") }?.name
         return owner.map { "\($0) · \(action)" } ?? action
     }
@@ -94,20 +101,24 @@ extension Connector {
     }
 
     /// Tells the bot what it's connected to, and how to ask for more.
-    static func chatInstructions(bot: Bot, catalog: [Connector], isClaude: Bool) -> String {
-        let mine = isClaude ? catalog.filter { $0.isConnected && bot.connections?.contains($0.id) == true } : []
+    static func chatInstructions(bot: Bot, catalog: [Connector], provider: AppConfig.Provider) -> String {
+        let canUseComputer = provider.canUseComputer
+        let account = provider == .gpt ? "ChatGPT" : "Claude"
+        let setup = provider == .gpt ? "ChatGPT → Settings → Apps → Gmail" : "claude.ai → Settings → Connectors"
+        let catalog = catalog.filter { $0.provider == (provider == .xai ? .claude : provider) }
+        let mine = provider != .xai ? catalog.filter { $0.isConnected && bot.connections?.contains($0.id) == true } : []
         let available = catalog.filter { c in c.isConnected && !mine.contains { $0.id == c.id } }
         let unset = catalog.filter { !$0.isConnected }
         var text = """
-        Connections: Bot27 can connect you to the user's services through their Claude account.
+        Connections: Bot27 can connect you to the user's services through their \(account) account.
         Connected for you now: \(mine.isEmpty ? "none" : mine.map(\.name).joined(separator: ", ")).
         Available to connect: \(available.isEmpty ? "none" : available.map(\.name).joined(separator: ", ")).
-        Not set up in the user's Claude account yet: \(unset.isEmpty ? "none" : unset.map(\.name).joined(separator: ", ")) \
-        (other services like Notion can be added at claude.ai → Settings → Connectors).
+        Not available in the user's \(account) account yet: \(unset.isEmpty ? "none" : unset.map(\.name).joined(separator: ", ")). \
+        Set up connections at \(setup), then refresh in Bot27.
         Computer use (see the screen and use the mouse and keyboard of this Mac, for tasks in apps or websites that no \
-        connector covers): \(isClaude && bot.computerUse == true ? "on" : "off; ask for it with {\"connector\": \"Computer\"}").
+        connector covers): \(canUseComputer && bot.computerUse == true ? "on" : "off; ask for it with {\"connector\": \"Computer\"}").
         Browser use (use the user's Google Chrome to open, read and act on web pages; better than computer use for \
-        anything on the web): \(isClaude && bot.browserUse == true ? "on" : "off; ask for it with {\"connector\": \"Browser\"}").
+        anything on the web): \(canUseComputer && bot.browserUse == true ? "on" : "off; ask for it with {\"connector\": \"Browser\"}").
         If a request needs a service you aren't connected to, don't ask the user to paste, screenshot or export things. \
         Ask to connect it by including this block in your reply, plus one short sentence on what you'll do once connected:
 
@@ -119,8 +130,10 @@ extension Connector {
         their request automatically. Use the same block for services that aren't set up yet: the user gets a link to add them. \
         Access is read-only, plus email drafts. To drop a connection: {"connector": "Gmail", "action": "disconnect"}.
         """
-        if !isClaude {
-            text += " Connecting also switches you to a Claude model, because connections only work with Claude."
+        if !canUseComputer {
+            text += " Connecting also switches you to a Claude model, because connections are unavailable with xAI."
+        } else if provider == .gpt {
+            text += " Gmail, computer and browser use work with your current GPT model. Only Gmail is supported as a GPT service connection."
         }
         return text
     }

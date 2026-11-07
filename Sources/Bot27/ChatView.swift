@@ -435,13 +435,18 @@ struct ConnectNoteCard: View {
     let note: ConnectNote
     let messageID: UUID
 
-    /// A service that wasn't set up may have been added at claude.ai since.
+    private var provider: AppConfig.Provider { store.selectedBot?.modelChoice.provider ?? .claude }
+
+    /// Resolve against the current provider, including when the model changed after the request.
     private var connector: Connector? {
-        store.connectors.first { $0.id == note.connectorID || $0.find(note.name) }
+        store.connectorCatalog(for: provider).first { $0.id == note.connectorID || $0.find(note.name) }
     }
 
     private var state: ConnectNote.State {
-        note.state == .unavailable && connector?.isConnected == true ? .requested : note.state
+        if !isComputer && !isBrowser && (note.state == .requested || note.state == .unavailable) {
+            return connector?.isConnected == true ? .requested : .unavailable
+        }
+        return note.state
     }
 
     var body: some View {
@@ -481,7 +486,8 @@ struct ConnectNoteCard: View {
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
                         .background(Capsule().fill(Theme.chip))
-                    Link("Open claude.ai", destination: URL(string: "https://claude.ai/settings/connectors")!)
+                    Link(provider == .gpt ? "Open ChatGPT" : "Open claude.ai",
+                         destination: provider == .gpt ? CodexConnectors.setupURL : URL(string: "https://claude.ai/settings/connectors")!)
                         .buttonStyle(BlackCapsuleStyle())
                 default:
                     EmptyView()
@@ -516,7 +522,7 @@ struct ConnectNoteCard: View {
         case .requested: return "Connect \(note.name)?"
         case .connected: return "\(note.name) connected"
         case .declined: return "\(note.name) not connected"
-        case .unavailable: return "\(note.name) isn't set up yet"
+        case .unavailable: return "\(note.name) isn't available yet"
         case .disconnected: return "\(note.name) disconnected"
         }
     }
@@ -525,25 +531,34 @@ struct ConnectNoteCard: View {
         switch state {
         case .requested where isBrowser:
             var text = "Lets this bot use your Google Chrome, with your signed-in accounts, to open, read and act on pages. A bar at the top of the screen lets you stop it anytime."
-            if !BrowserUse.isInstalled { text += " Needs the Claude in Chrome extension." }
-            if store.selectedBot?.modelChoice.provider != .claude {
+            if store.selectedBot?.modelChoice.provider == .gpt {
+                text += " Uses OpenAI Computer Use from the ChatGPT desktop app, including native Chrome window control. Claude Code is not required."
+                if NativeBrowser.locate() == nil { text += " Open ChatGPT and enable Computer Use first." }
+            } else {
+                if !BrowserUse.isInstalled { text += " Needs the Claude in Chrome extension." }
+                if ClaudeCLI.locate(custom: AppConfig.current.claudePath) == nil { text += " Needs the Claude Code CLI; install it or set its path in Settings." }
+            }
+            if store.selectedBot?.modelChoice.provider.canUseComputer == false {
                 text += " Also switches it to \(ModelChoice(provider: .claude, id: AppConfig.current.claudeModel).name)."
             }
             return text
         case .requested where isComputer:
             var text = "Lets this bot see your screen and use your mouse and keyboard. A bar at the top of the screen lets you stop it anytime."
             if !ComputerPermissions.granted { text += " macOS will ask you to allow Bot27." }
-            if store.selectedBot?.modelChoice.provider != .claude {
+            if store.selectedBot?.modelChoice.provider.canUseComputer == false {
                 text += " Also switches it to \(ModelChoice(provider: .claude, id: AppConfig.current.claudeModel).name)."
             }
             return text
         case .requested:
             var text = "Lets this bot \(connector?.accessText ?? "read your \(note.name)"). Nothing is sent, changed or deleted."
-            if store.selectedBot?.modelChoice.provider != .claude {
+            if provider == .xai {
                 text += " Also switches it to \(ModelChoice(provider: .claude, id: AppConfig.current.claudeModel).name)."
             }
             return text
         case .unavailable:
+            if provider == .gpt {
+                return connector.map(CodexConnectors.statusText) ?? "GPT service connections currently support Gmail only."
+            }
             return "Add it to your Claude account at claude.ai → Settings → Connectors, then press Refresh."
         default:
             return nil

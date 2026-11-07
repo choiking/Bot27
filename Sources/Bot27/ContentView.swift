@@ -168,7 +168,7 @@ struct BotRow: View {
     }
 }
 
-/// Per-bot switches for claude.ai connectors. Access is read-only, plus drafts.
+/// Per-bot, per-provider connection switches. Access is read-only, plus drafts.
 struct ConnectionsPicker: View {
     @EnvironmentObject var store: ChatStore
     @Binding var bot: Bot
@@ -196,23 +196,26 @@ struct ConnectionsPicker: View {
                 .foregroundStyle(Theme.secondary)
                 .help("Refresh connectors")
             }
-            if bot.modelChoice.provider != .claude {
-                Text("Connections work with Claude models.")
+            if bot.modelChoice.provider == .xai {
+                Text("Connections work with Claude and GPT models.")
                     .font(.system(size: 12.5))
                     .foregroundStyle(Theme.secondary)
-            } else if store.connectors.isEmpty {
+            } else if store.connectorCatalog(for: bot.modelChoice.provider).isEmpty {
                 Text("No connectors yet. Add Gmail, Notion and more at claude.ai → Settings → Connectors.")
                     .font(.system(size: 12.5))
                     .foregroundStyle(Theme.secondary)
             } else {
                 VStack(spacing: 0) {
-                    ForEach(store.connectors) { connector in
+                    ForEach(store.connectorCatalog(for: bot.modelChoice.provider)) { connector in
                         Toggle(isOn: binding(connector.id)) {
                             HStack {
                                 Text(connector.name).font(.system(size: 13))
                                 Spacer()
                                 if !connector.isConnected {
-                                    Text("Sign in at claude.ai").font(.system(size: 11.5)).foregroundStyle(Theme.secondary)
+                                    Text(connector.provider == .gpt
+                                         ? (connector.status == "checking" ? "Checking…" : "Unavailable")
+                                         : "Sign in at claude.ai")
+                                        .font(.system(size: 11.5)).foregroundStyle(Theme.secondary)
                                 } else if connector.canDraft {
                                     Text("Read · drafts").font(.system(size: 11.5)).foregroundStyle(Theme.secondary)
                                 } else {
@@ -229,6 +232,13 @@ struct ConnectionsPicker: View {
                 }
                 .background(RoundedRectangle(cornerRadius: 10).fill(.white))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border))
+                if bot.modelChoice.provider == .gpt,
+                   let gmail = store.connectorCatalog(for: .gpt).first, !gmail.isConnected {
+                    Text(CodexConnectors.statusText(gmail))
+                        .font(.system(size: 11.5)).foregroundStyle(Theme.secondary)
+                    Link("Open Gmail in ChatGPT", destination: CodexConnectors.setupURL)
+                        .font(.system(size: 11.5))
+                }
                 Text("Bots can search and read. Nothing is sent, changed or deleted; emails become drafts.")
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.secondary)

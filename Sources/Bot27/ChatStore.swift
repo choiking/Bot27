@@ -43,11 +43,11 @@ struct Bot: Identifiable, Codable, Equatable {
     var provider: String? = nil
     var model: String? = nil
     var pinned: Bool? = nil
-    /// IDs of the connectors (claude.ai MCP servers) this bot may use.
+    /// IDs of the provider-specific service connections this bot may use.
     var connections: [String]? = nil
-    /// Lets the bot see the screen and use the mouse and keyboard (Claude models only).
+    /// Lets the bot see the screen and use the mouse and keyboard (Claude and GPT).
     var computerUse: Bool? = nil
-    /// Lets the bot use the user's Chrome via Claude in Chrome (Claude models only).
+    /// Lets the bot use the user's Chrome via Claude in Chrome (Claude and GPT).
     var browserUse: Bool? = nil
     var jobs: [BotJob]? = nil
     /// Older messages folded into a summary, which the bot sees instead of them.
@@ -140,6 +140,7 @@ final class ChatStore: ObservableObject {
         didSet { ComputerRelay.shared.active = !computerRuns.isEmpty }
     }
     @Published private(set) var connectors: [Connector] = []
+    private var codexConnectorRefresh: Task<Void, Never>?
 
     private var tasks: [UUID: Task<Void, Never>] = [:]
     /// Jobs started while their bot was busy; they run once it's free.
@@ -187,8 +188,9 @@ final class ChatStore: ObservableObject {
         selectedID = sortedBots.first?.id
         if let data = defaults.data(forKey: "connectorCatalog"),
            let cached = try? JSONDecoder().decode([Connector].self, from: data) {
-            connectors = cached
+            connectors = cached.filter { $0.provider == .claude }
         }
+        connectors.append(CodexConnectors.gmail(status: "checking"))
         refreshConnectors()
         ComputerRelay.shared.start()
         Notifier.shared.open = { [weak self] id in self?.select(id) }
@@ -208,6 +210,15 @@ final class ChatStore: ObservableObject {
     }
 
     func refreshConnectors() {
+        codexConnectorRefresh?.cancel()
+        connectors.removeAll { $0.provider == .gpt }
+        connectors.append(CodexConnectors.gmail(status: "checking"))
+        codexConnectorRefresh = Task {
+            let gmail = await CodexConnectors.discover(custom: AppConfig.current.codexPath)
+            guard !Task.isCancelled else { return }
+            connectors.removeAll { $0.provider == .gpt }
+            connectors.append(gmail)
+        }
         Task {
             // Connectors can still be "pending" when the CLI starts; retry, then keep the
             // last known tools for any that haven't finished connecting.
@@ -224,11 +235,15 @@ final class ChatStore: ObservableObject {
                 else { return c }
                 return old
             }
-            connectors = found
+            connectors = found + connectors.filter { $0.provider == .gpt }
             if let data = try? JSONEncoder().encode(found) {
                 UserDefaults.standard.set(data, forKey: "connectorCatalog")
             }
         }
+    }
+
+    func connectorCatalog(for provider: AppConfig.Provider) -> [Connector] {
+        connectors.filter { $0.provider == (provider == .xai ? .claude : provider) }
     }
 
     /// Sidebar order: pinned bots first, each group most recent first.
@@ -409,14 +424,14 @@ final class ChatStore: ObservableObject {
         var connectNotes: [ConnectNote] = []
         for block in connects {
             guard let spec = block.spec else { continue }
-            let connector = connectors.first { $0.find(spec.connector) }
+            let connector = connectorCatalog(for: bot.modelChoice.provider).first { $0.find(spec.connector) }
             if spec.connector.caseInsensitiveCompare(Connector.browserID) == .orderedSame {
                 if spec.action == "disconnect" {
                     if browserUse {
                         browserUse = false
                         connectNotes.append(ConnectNote(connectorID: Connector.browserID, name: "Browser use", state: .disconnected))
                     }
-                } else if !(browserUse && bot.modelChoice.provider == .claude) {
+                } else if !(browserUse && bot.modelChoice.provider.canUseComputer) {
                     connectNotes.append(ConnectNote(connectorID: Connector.browserID, name: "Browser use", state: .requested))
                 }
             } else if spec.connector.caseInsensitiveCompare(Connector.computerID) == .orderedSame {
@@ -425,7 +440,7 @@ final class ChatStore: ObservableObject {
                         computerUse = false
                         connectNotes.append(ConnectNote(connectorID: Connector.computerID, name: "Computer use", state: .disconnected))
                     }
-                } else if !(computerUse && bot.modelChoice.provider == .claude) {
+                } else if !(computerUse && bot.modelChoice.provider.canUseComputer) {
                     connectNotes.append(ConnectNote(connectorID: Connector.computerID, name: "Computer use", state: .requested))
                 }
             } else if spec.action == "disconnect" {
@@ -433,7 +448,7 @@ final class ChatStore: ObservableObject {
                 connections.removeAll { $0 == connector.id }
                 connectNotes.append(ConnectNote(connectorID: connector.id, name: connector.name, state: .disconnected))
             } else if let connector, connector.isConnected {
-                let usable = bot.modelChoice.provider == .claude && connections.contains(connector.id)
+                let usable = bot.modelChoice.provider == connector.provider && connections.contains(connector.id)
                 if !usable {
                     connectNotes.append(ConnectNote(connectorID: connector.id, name: connector.name, state: .requested))
                 }
@@ -498,7 +513,7 @@ final class ChatStore: ObservableObject {
         if connectorID == Connector.browserID {
             mutate(botID) { bot in
                 bot.browserUse = true
-                if bot.modelChoice.provider != .claude {
+                if !bot.modelChoice.provider.canUseComputer {
                     bot.modelChoice = ModelChoice(provider: .claude, id: AppConfig.current.claudeModel)
                 }
                 setConnectState(&bot, messageID, connectorID, .connected)
@@ -513,7 +528,7 @@ final class ChatStore: ObservableObject {
             ComputerPermissions.request()
             mutate(botID) { bot in
                 bot.computerUse = true
-                if bot.modelChoice.provider != .claude {
+                if !bot.modelChoice.provider.canUseComputer {
                     bot.modelChoice = ModelChoice(provider: .claude, id: AppConfig.current.claudeModel)
                 }
                 setConnectState(&bot, messageID, connectorID, .connected)
@@ -524,14 +539,25 @@ final class ChatStore: ObservableObject {
             respond(in: botID)
             return
         }
-        guard let connector = connectors.first(where: { $0.id == connectorID }) else { return }
+        guard let selected = bots.first(where: { $0.id == botID }),
+              let connector = connectorCatalog(for: selected.modelChoice.provider).first(where: { $0.id == connectorID }),
+              connector.isConnected else { return }
         mutate(botID) { bot in
             if bot.connections?.contains(connectorID) != true {
                 bot.connections = (bot.connections ?? []) + [connectorID]
             }
-            // Connections only work with Claude models.
-            if bot.modelChoice.provider != .claude {
+            if bot.modelChoice.provider == .xai {
                 bot.modelChoice = ModelChoice(provider: .claude, id: AppConfig.current.claudeModel)
+            }
+            // A previously unavailable request may have no ID, or an ID from the old provider.
+            if let m = bot.messages.firstIndex(where: { $0.id == messageID }) {
+                bot.messages[m].connectNotes = bot.messages[m].connectNotes?.map { note in
+                    var note = note
+                    if connector.find(note.name), note.state == .requested || note.state == .unavailable {
+                        note.connectorID = connectorID
+                    }
+                    return note
+                }
             }
             setConnectState(&bot, messageID, connectorID, .connected)
             bot.messages.append(Message(role: .user,
@@ -712,8 +738,9 @@ final class ChatStore: ObservableObject {
         moveToTop(id)
 
         var config = AppConfig.current.with(bot.modelChoice)
-        let enabled = config.provider == .claude
-            ? connectors.filter { $0.isConnected && bot.connections?.contains($0.id) == true }
+        let catalog = connectorCatalog(for: config.provider)
+        let enabled = config.provider != .xai
+            ? catalog.filter { $0.isConnected && bot.connections?.contains($0.id) == true }
             : []
         var connectionNote = ""
         if !enabled.isEmpty {
@@ -723,13 +750,13 @@ final class ChatStore: ObservableObject {
                 connectionNote += " When asked to write an email, create a draft and tell the user it's waiting in their Drafts folder."
             }
         }
-        let allConnectors = connectors
-        let connectHint = Connector.chatInstructions(bot: bot, catalog: connectors, isClaude: config.provider == .claude)
-        let useComputer = config.provider == .claude && bot.computerUse == true
-        let useBrowser = config.provider == .claude && bot.browserUse == true
+        let allConnectors = catalog
+        let connectHint = Connector.chatInstructions(bot: bot, catalog: catalog, provider: config.provider)
+        let useComputer = config.provider.canUseComputer && bot.computerUse == true
+        let useBrowser = config.provider.canUseComputer && bot.browserUse == true
         config.systemPrompt = [config.systemPrompt, "Your name is \(bot.name).", bot.instructions, connectionNote,
                                useComputer ? ComputerPermissions.botRules : "",
-                               useBrowser ? BrowserUse.botRules : "",
+                               useBrowser ? (config.provider == .gpt ? NativeBrowser.botRules : BrowserUse.botRules) : "",
                                connectHint, BotJob.chatInstructions(existing: bot.jobList),
                                MemoryPrompt.chatInstructions(bot: id, main: !isolated),
                                daily.isEmpty ? "" : "Your notes from recent sessions (you don't have those chats):\n" + daily,
@@ -750,31 +777,35 @@ final class ChatStore: ObservableObject {
         if useComputer { computerRuns.insert(id) }
         tasks[id] = Task { [weak self] in
             do {
+                try Task.checkCancellation()
                 let replies: AsyncThrowingStream<String, Error>
+                let onActivity: (String) -> Void = { text in
+                    Task { @MainActor in self?.activity[id] = text.isEmpty ? nil : text }
+                }
+                let onComputer: () -> Void = {
+                    Task { @MainActor in
+                        guard let self, self.streaming.contains(id), !self.computerActive.contains(id) else { return }
+                        self.computerActive.insert(id)
+                        self.updateComputerBar()
+                    }
+                }
+                let onBrowser: () -> Void = {
+                    Task { @MainActor in
+                        guard let self, self.streaming.contains(id), !self.browserActive.contains(id) else { return }
+                        self.browserActive.insert(id)
+                        self.updateComputerBar()
+                    }
+                }
                 switch config.provider {
                 case .claude:
-                    let onActivity: (String) -> Void = { text in
-                        Task { @MainActor in self?.activity[id] = text.isEmpty ? nil : text }
-                    }
-                    let onComputer: () -> Void = {
-                        Task { @MainActor in
-                            guard let self, self.streaming.contains(id), !self.computerActive.contains(id) else { return }
-                            self.computerActive.insert(id)
-                            self.updateComputerBar()
-                        }
-                    }
-                    let onBrowser: () -> Void = {
-                        Task { @MainActor in
-                            guard let self, self.streaming.contains(id), !self.browserActive.contains(id) else { return }
-                            self.browserActive.insert(id)
-                            self.updateComputerBar()
-                        }
-                    }
                     replies = ClaudeCLI(config: config, connectors: enabled, allConnectors: allConnectors,
                                         onActivity: onActivity, computerUse: useComputer,
                                         onComputer: onComputer, browserUse: useBrowser,
                                         onBrowser: onBrowser).stream(history)
-                case .gpt: replies = CodexCLI(config: config).stream(history)
+                case .gpt:
+                    replies = CodexCLI(config: config, connectors: enabled, onActivity: onActivity, computerUse: useComputer,
+                                       onComputer: onComputer, browserUse: useBrowser,
+                                       onBrowser: onBrowser).stream(history)
                 case .xai: replies = XAIClient(config: config).stream(history)
                 }
                 for try await delta in replies {
