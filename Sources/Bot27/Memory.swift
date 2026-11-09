@@ -2,10 +2,10 @@ import Foundation
 
 /// The files each bot keeps in its own folder, in the order they're loaded. Bots never see each other's files.
 enum MemoryFile: String, Codable, CaseIterable {
-    case soul = "SOUL.md", user = "USER.md", memory = "MEMORY.md"
+    case agents = "AGENTS.md", soul = "SOUL.md", user = "USER.md", memory = "MEMORY.md"
 
     /// What routines see; MEMORY.md is for the main chat only.
-    static let routineFiles: [MemoryFile] = [.soul, .user]
+    static let routineFiles: [MemoryFile] = [.agents, .soul, .user]
 
     /// Accepts "USER.md", "user" and the like.
     init?(loose: String) {
@@ -18,6 +18,7 @@ enum MemoryFile: String, Codable, CaseIterable {
     /// What the file is for, as shown in Edit Bot.
     var caption: String {
         switch self {
+        case .agents: return "Workspace instructions. Loaded every time; edit this file yourself."
         case .soul: return "Who the bot is and how it works. Rules you give it are added at the end."
         case .user: return "Who you are: facts, preferences and your setup."
         case .memory: return "Long-term memory. Read in the chat only, never in routines."
@@ -26,6 +27,15 @@ enum MemoryFile: String, Codable, CaseIterable {
 
     var template: String {
         switch self {
+        case .agents: return """
+            # AGENTS.md - Bot Workspace
+
+            Follow SOUL.md and USER.md, and use today's and yesterday's daily notes for context.
+            MEMORY.md is private to the main chat, not routines.
+            Bot27 supplies these files in the prompt and automatically saves main-chat messages by date
+            in memory/. Use Bot27's memory and recall blocks to save lasting facts or search older notes.
+
+            """
         case .soul: return Self.soulTemplate
         case .user: return "# USER.md - About the User\n\n_Who this bot is helping: facts, preferences, and their setup (devices, apps, accounts). Read every session, routines included._\n\n"
         case .memory: return "# MEMORY.md - Long-term Memory\n\n_Decisions, events and things worth remembering. Read in the chat only, never in routines._\n\n"
@@ -106,6 +116,7 @@ enum MemoryStore {
     /// Adds a note unless it's already there.
     @discardableResult
     static func add(_ text: String, for bot: UUID, _ file: MemoryFile = .memory) -> Bool {
+        guard file != .agents else { return false }
         let text = clean(text)
         guard !text.isEmpty, !notes(for: bot, file).contains(text) else { return false }
         var contents = read(bot, file)
@@ -117,6 +128,7 @@ enum MemoryStore {
 
     @discardableResult
     static func remove(_ text: String, for bot: UUID, _ file: MemoryFile = .memory) -> Bool {
+        guard file != .agents else { return false }
         let text = clean(text)
         var lines = read(bot, file).components(separatedBy: "\n")
         guard let i = lines.firstIndex(where: { note(in: $0) == text }) else { return false }
@@ -209,7 +221,8 @@ enum MemoryPrompt {
     static func chatInstructions(bot: UUID, main: Bool) -> String {
         guard main else {
             return """
-            Your files follow (other bots in Bot27 have their own): SOUL.md is who you are, USER.md is who you're \
+            Your files follow (other bots in Bot27 have their own): AGENTS.md contains workspace instructions, \
+            SOUL.md is who you are, USER.md is who you're \
             helping. This is a routine, running in a session of its own: the chat and MEMORY.md aren't loaded, and \
             you don't change files from routines.
 
@@ -219,9 +232,13 @@ enum MemoryPrompt {
             """
         }
         return """
-        Your files follow (other bots in Bot27 have their own): SOUL.md is who you are and how the user wants you \
+        Your files follow (other bots in Bot27 have their own): AGENTS.md contains workspace instructions, \
+        SOUL.md is who you are and how the user wants you \
         to work, USER.md is who you're helping, and MEMORY.md is your long-term memory, private to this chat. You \
-        start each session fresh, so write down what's worth keeping. To add a line to a file, include a block like \
+        have one ongoing chat. Bot27 automatically archives main-chat messages in memory/YYYY-MM-DD.md; \
+        you don't need to write those logs yourself. The files below are already loaded; use the available \
+        Bot27 tools, not shell commands, to work with memory. AGENTS.md is maintained by the user. \
+        To save something lasting, include a block like \
         this in your reply (it is hidden from the user, who sees a small card with Undo):
 
         ```bot27-memory
@@ -392,6 +409,47 @@ enum DailyNotes {
 
     static func folder(for bot: UUID) -> URL {
         MemoryStore.folder(for: bot).appendingPathComponent("memory", isDirectory: true)
+    }
+
+    /// Append missing main-chat messages, including history from before daily archiving existed.
+    /// Existing notes are preserved; stable message IDs make repeated saves and restarts idempotent.
+    static func save(_ messages: [Message], for bot: UUID) throws {
+        try save(messages, in: folder(for: bot))
+    }
+
+    static func save(_ messages: [Message], in folder: URL) throws {
+        var days: [String: [Message]] = [:], inRoutine = false
+        for message in messages {
+            if message.role == .user && message.notice != RecallSpec.notice {
+                inRoutine = message.job != nil
+            }
+            guard !inRoutine, message.notice == nil, message.isError != true,
+                  !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || message.images?.isEmpty == false else { continue }
+            days[stamp(message.date, "yyyy-MM-dd"), default: []].append(message)
+        }
+        guard !days.isEmpty else { return }
+        let fm = FileManager.default
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        for day in days.keys.sorted() {
+            let url = folder.appendingPathComponent(day + ".md")
+            // A read failure must not turn an existing file into an empty one.
+            let original = fm.fileExists(atPath: url.path) ? try String(contentsOf: url, encoding: .utf8) : ""
+            var text = original
+            var markers = Set(original.components(separatedBy: "\n").filter { $0.hasPrefix("<!-- bot27-message:") })
+            for message in days[day]!.sorted(by: { $0.date < $1.date }) {
+                let marker = "<!-- bot27-message:\(message.id.uuidString) -->"
+                guard markers.insert(marker).inserted else { continue }
+                if text.isEmpty { text = "# \(day)\n\n" }
+                if !text.hasSuffix("\n\n") { text += text.hasSuffix("\n") ? "\n" : "\n\n" }
+                let role = message.role == .user ? "User" : "Assistant"
+                let images = message.images?.count ?? 0
+                text += marker + "\n## \(stamp(message.date, "HH:mm:ss")) · \(role)\n\n"
+                if images > 0 { text += "[\(images) image(s) attached]\n\n" }
+                text += message.content + "\n"
+            }
+            if text != original { try Data(text.utf8).write(to: url, options: .atomic) }
+        }
     }
 
     /// The date in local time, e.g. "2026-10-27" for "yyyy-MM-dd".

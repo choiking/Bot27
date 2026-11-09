@@ -179,6 +179,7 @@ final class ChatStore: ObservableObject {
             }
         }
         for bot in bots { MemoryStore.setUp(bot) }
+        archiveDailyNotes()
         // The main bot starts pinned, once; after that pinning is the user's call.
         let defaults = UserDefaults.standard
         if !defaults.bool(forKey: "pinnedMainBot") {
@@ -730,6 +731,8 @@ final class ChatStore: ObservableObject {
     /// Replies in a bot's chat. A routine run (`isolated`) sees only its own messages.
     private func respond(in id: UUID, isolated: Bool = false) {
         guard let bot = bots.first(where: { $0.id == id }) else { return }
+        // Persist the user's message and daily notes even if the provider never replies.
+        save()
         let usable: (Message) -> Bool = { $0.isError != true && !($0.notice != nil && $0.content.isEmpty) }
         let routineStart = max(0, bot.messages.lastIndex(where: { $0.job != nil }) ?? bot.messages.count - 1)
         let history = isolated ? Array(bot.messages[routineStart...]).filter(usable) : bot.recentMessages.filter(usable)
@@ -759,7 +762,7 @@ final class ChatStore: ObservableObject {
                                useBrowser ? (config.provider == .gpt ? NativeBrowser.botRules : BrowserUse.botRules) : "",
                                connectHint, BotJob.chatInstructions(existing: bot.jobList),
                                MemoryPrompt.chatInstructions(bot: id, main: !isolated),
-                               daily.isEmpty ? "" : "Your notes from recent sessions (you don't have those chats):\n" + daily,
+                               daily.isEmpty ? "" : "Recent daily notes (dated chat logs; may overlap this conversation):\n" + daily,
                                !isolated && bot.hasSummary ?"Older messages in this chat, summarized (the recent ones follow in full):\n"
                                    + (bot.summary ?? "") : "",
                                AppConfig.optionsHint,
@@ -908,5 +911,14 @@ final class ChatStore: ObservableObject {
     private func save() {
         guard let data = try? JSONEncoder().encode(bots) else { return }
         try? data.write(to: fileURL, options: .atomic)
+        archiveDailyNotes()
+    }
+
+    private func archiveDailyNotes() {
+        // Never archive an assistant reply while it is still arriving.
+        for bot in bots where !streaming.contains(bot.id) {
+            do { try DailyNotes.save(bot.messages, for: bot.id) }
+            catch { NSLog("Bot27: daily notes for %@ could not be saved: %@", bot.id.uuidString, error.localizedDescription) }
+        }
     }
 }

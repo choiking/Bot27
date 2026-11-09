@@ -216,7 +216,7 @@ struct SessionSettings: View {
         } header: {
             Text("Memory")
         } footer: {
-            Text("Each bot keeps one ongoing chat; long chats are summarized instead of cut off. Every chat reads today's and yesterday's notes in the bot's memory/ folder, and bots can search older ones. Routines run in sessions of their own, without MEMORY.md. Dreaming moves lasting daily notes into MEMORY.md.")
+            Text("Each bot keeps one ongoing chat; long chats are summarized instead of cut off. Main-chat messages are saved automatically by date in memory/, with missing notes recovered on startup. Every chat reads today's and yesterday's notes, and bots can search older ones. Routines run separately, without MEMORY.md. Dreaming reviews daily notes while Bot27 is running and moves lasting facts into MEMORY.md; missed runs catch up when the app opens.")
                 .foregroundStyle(.secondary)
         }
     }

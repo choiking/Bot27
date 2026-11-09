@@ -19,11 +19,13 @@
 
 - **Many bots.** Each has its own name, look, instructions and model.
 - **Three providers.** Claude runs through the Claude Code CLI, GPT through the Codex CLI, and Grok through the xAI API.
-- **Memory.** Each bot keeps three Markdown files that it adds to as you chat, and that you can edit:
+- **Memory.** Each bot keeps its own Markdown files, which you can edit:
+  - `AGENTS.md`: workspace instructions, loaded every time and maintained by you.
   - `SOUL.md`: who the bot is.
   - `USER.md`: who you are.
   - `MEMORY.md`: things worth remembering.
-- **Daily notes.** Notes in the bot's `memory/` folder: today's and yesterday's are read in every chat, and the bot can search older ones.
+- **Daily notes.** Main-chat messages are saved automatically by local date in `memory/YYYY-MM-DD.md`. On startup, missing messages are recovered from retained chat history, preserving existing notes without duplicates. Routines and errors are excluded. Today's and yesterday's notes are read in every chat, and the bot can search older ones.
+- **Dreaming.** Enable it in Settings → Memory to review daily notes and promote lasting facts into `MEMORY.md` at 3:00 a.m. while Bot27 is running. Missed runs catch up when the app opens.
 - **One chat per bot.** Each bot keeps one ongoing chat. Long chats are summarized instead of cut off.
 - **Tasks and routines.** One-off or scheduled jobs. Routines run in sessions of their own.
 - **Connections** (Claude and GPT). GPT uses Gmail through your ChatGPT account; Claude uses Gmail, Google Calendar and other claude.ai connectors. They are read-only, except that bots can write email drafts.

@@ -79,7 +79,7 @@ struct BotEditor: View {
 
     private var memoryTab: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("This bot's own files; other bots can't see them. Every chat reads all three, and routines read all but MEMORY.md. The bot adds lines as you talk; this view is read-only.")
+            Text("This bot's own files; other bots can't see them. Every chat reads these files, and routines read all but MEMORY.md. AGENTS.md holds your workspace instructions; the bot adds memories to the other files as you talk. This view is read-only.")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.secondary)
                 .fixedSize(horizontal: false, vertical: true)
