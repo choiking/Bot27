@@ -1,4 +1,27 @@
+import Foundation
 import SwiftUI
+
+/// Results derived from message text, keyed by that text. Switching bots rebuilds the
+/// transcript, so without this every visible reply would be parsed again. Text-keyed
+/// entries stay valid when a message changes (e.g. while streaming): new text is a new key.
+final class TextCache<Value>: @unchecked Sendable {
+    private final class Box {
+        let value: Value
+        init(_ value: Value) { self.value = value }
+    }
+    private let cache = NSCache<NSString, Box>()
+
+    /// `limit` is the total length of cached keys in UTF-16 units; NSCache evicts beyond it.
+    init(limit: Int) { cache.totalCostLimit = limit }
+
+    func value(for key: String, _ make: () -> Value) -> Value {
+        let nsKey = key as NSString
+        if let hit = cache.object(forKey: nsKey) { return hit.value }
+        let value = make()
+        cache.setObject(Box(value), forKey: nsKey, cost: nsKey.length)
+        return value
+    }
+}
 
 /// Lightweight Markdown: fenced code, headings, lists, tables, and inline styles.
 struct MarkdownView: View {
@@ -14,7 +37,7 @@ struct MarkdownView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            ForEach(Array(Self.parse(text).enumerated()), id: \.offset) { _, block in
+            ForEach(Array(Self.blocks(text).enumerated()), id: \.offset) { _, block in
                 switch block {
                 case let .paragraph(s):
                     Text(Self.inline(s)).font(.system(size: 14.5)).lineSpacing(3)
@@ -53,9 +76,19 @@ struct MarkdownView: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
+    private static let blockCache = TextCache<[Block]>(limit: 2_000_000)
+    private static let inlineCache = TextCache<AttributedString>(limit: 2_000_000)
+
+    /// Parsed blocks, reused across redraws and transcript rebuilds.
+    static func blocks(_ text: String) -> [Block] {
+        blockCache.value(for: text) { parse(text) }
+    }
+
     static func inline(_ s: String) -> AttributedString {
-        (try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-            ?? AttributedString(s)
+        inlineCache.value(for: s) {
+            (try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+                ?? AttributedString(s)
+        }
     }
 
     static func parse(_ text: String) -> [Block] {

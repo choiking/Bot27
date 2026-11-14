@@ -11,7 +11,7 @@ struct ChatView: View {
             VStack(spacing: 0) {
                 ZStack(alignment: .top) {
                     Transcript(bot: bot)
-                        // Each conversation needs its own scroll position and lazy layout cache.
+                        // Each conversation needs its own scroll position.
                         .id(bot.id)
                     Button { store.edit(bot.id) } label: {
                         HStack(spacing: 8) {
@@ -64,11 +64,27 @@ struct ChatView: View {
 struct Transcript: View {
     @EnvironmentObject var store: ChatStore
     let bot: Bot
+    private static let pageSize = 40
+    @State private var firstMessageID: UUID?
+    @State private var historyAnchor: UUID?
+
+    init(bot: Bot) {
+        self.bot = bot
+        _firstMessageID = State(initialValue: bot.messages.suffix(Self.pageSize).first?.id)
+    }
+
+    private var firstMessageIndex: Int {
+        firstMessageID.flatMap { id in bot.messages.firstIndex { $0.id == id } }
+            ?? max(0, bot.messages.count - Self.pageSize)
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
+                // Message heights change with Markdown, folding and action cards. A lazy
+                // stack can leave the viewport empty until a manual scroll realizes rows.
+                // Eagerly lay out a bounded page so switching bots doesn't render all history.
+                VStack(alignment: .leading, spacing: 10) {
                     if bot.messages.isEmpty {
                         VStack(spacing: 10) {
                             BotAvatar(shape: bot.shape, color: bot.color, size: 64)
@@ -84,23 +100,37 @@ struct Transcript: View {
                         .frame(maxWidth: .infinity)
                         .padding(.top, 140)
                     }
-                    ForEach(Array(bot.messages.enumerated()), id: \.element.id) { i, message in
-                        if i == 0 || message.date.timeIntervalSince(bot.messages[i - 1].date) > 3600 {
-                            Text(Self.stamp(message.date))
-                                .font(.system(size: 12))
-                                .foregroundStyle(Theme.secondary)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
+                    if firstMessageIndex > 0 {
+                        Button("Load earlier messages") {
+                            historyAnchor = bot.messages[firstMessageIndex].id
+                            firstMessageID = bot.messages[max(0, firstMessageIndex - Self.pageSize)].id
                         }
-                        MessageRow(message: message, isLast: i == bot.messages.count - 1)
-                        if bot.hasSummary && message.id == bot.summaryThrough {
-                            Label("Earlier messages are summarized for \(bot.name)", systemImage: "text.append")
-                                .font(.system(size: 12))
-                                .foregroundStyle(Theme.secondary)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                                .help(bot.summary ?? "")
+                        .buttonStyle(.plain)
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(Theme.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                    }
+                    ForEach(Array(bot.messages.enumerated().dropFirst(firstMessageIndex)), id: \.element.id) { i, message in
+                        VStack(alignment: .leading, spacing: 10) {
+                            if i == firstMessageIndex || message.date.timeIntervalSince(bot.messages[i - 1].date) > 3600 {
+                                Text(Self.stamp(message.date))
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Theme.secondary)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
+                            }
+                            MessageRow(message: message, isLast: i == bot.messages.count - 1)
+                            if bot.hasSummary && message.id == bot.summaryThrough {
+                                Label("Earlier messages are summarized for \(bot.name)", systemImage: "text.append")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Theme.secondary)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
+                                    .help(bot.summary ?? "")
+                            }
                         }
+                        .id(message.id)
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }
@@ -111,6 +141,17 @@ struct Transcript: View {
                 .frame(maxWidth: .infinity)
             }
             .defaultScrollAnchor(.bottom)
+            .task(id: firstMessageID) {
+                // Position after layout; loading history keeps the previous first row in view.
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+                if let historyAnchor {
+                    proxy.scrollTo(historyAnchor, anchor: .top)
+                    self.historyAnchor = nil
+                } else {
+                    proxy.scrollTo("bottom", anchor: .bottom)
+                }
+            }
             .onChange(of: bot.messages.last?.id) {
                 proxy.scrollTo("bottom", anchor: .bottom)
             }
@@ -265,8 +306,16 @@ struct MessageRow: View {
         }
     }
 
+    typealias SplitReply = (body: String, question: String?, options: [(letter: String, text: String)])
+    private static let optionsCache = TextCache<SplitReply>(limit: 2_000_000)
+
     /// Pulls a trailing "question + A./B./C. options" block out of a reply.
-    static func splitOptions(_ text: String) -> (body: String, question: String?, options: [(letter: String, text: String)]) {
+    /// Cached because finished replies are split again on every redraw and bot switch.
+    static func splitOptions(_ text: String) -> SplitReply {
+        optionsCache.value(for: text) { parseOptions(text) }
+    }
+
+    private static func parseOptions(_ text: String) -> SplitReply {
         func blank(_ s: String?) -> Bool { s?.trimmingCharacters(in: .whitespaces).isEmpty == true }
         var lines = text.components(separatedBy: "\n")
         while blank(lines.last) { lines.removeLast() }

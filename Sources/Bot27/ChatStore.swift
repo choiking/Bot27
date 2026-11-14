@@ -151,6 +151,9 @@ final class ChatStore: ObservableObject {
     private var dreaming: Set<UUID> = []
     private var scheduler: Timer?
     private let fileURL: URL
+    private static let saveQueue = DispatchQueue(label: "Bot27.save", qos: .utility)
+    /// Per bot, a fingerprint of the messages last written to daily notes.
+    private var archivedFingerprints: [UUID: Int] = [:]
 
     init() {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -197,6 +200,9 @@ final class ChatStore: ObservableObject {
         Notifier.shared.open = { [weak self] id in self?.select(id) }
         Notifier.shared.isShowing = { [weak self] id in NSApp.isActive && self?.selectedID == id }
         Notifier.shared.setUp()
+        // Saves are written in the background; finish them before quitting.
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification,
+                                               object: nil, queue: nil) { _ in ChatStore.flushSaves() }
         // Asking is what puts Bot27 in System Settings' permission lists.
         if bots.contains(where: { $0.computerUse == true }), !ComputerPermissions.granted {
             ComputerPermissions.request()
@@ -258,6 +264,8 @@ final class ChatStore: ObservableObject {
     func select(_ id: UUID) {
         selectedID = id
         Notifier.shared.seen(bot: id)
+        // The selection itself isn't persisted; only clearing an unread dot needs a save.
+        guard bots.first(where: { $0.id == id })?.unread == true else { return }
         mutate(id) { $0.unread = false }
         save()
     }
@@ -909,16 +917,45 @@ final class ChatStore: ObservableObject {
     }
 
     private func save() {
-        guard let data = try? JSONEncoder().encode(bots) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        // Encode and write off the main thread so the UI doesn't wait on every bot's history.
+        // A serial queue keeps writes in order; the latest snapshot always lands last.
+        let snapshot = bots, url = fileURL
+        Self.saveQueue.async {
+            guard let data = try? JSONEncoder().encode(snapshot) else { return }
+            try? data.write(to: url, options: .atomic)
+        }
         archiveDailyNotes()
     }
+
+    /// Waits for pending writes, e.g. before the app quits.
+    static func flushSaves() { saveQueue.sync {} }
 
     private func archiveDailyNotes() {
         // Never archive an assistant reply while it is still arriving.
         for bot in bots where !streaming.contains(bot.id) {
-            do { try DailyNotes.save(bot.messages, for: bot.id) }
+            // Bots whose messages haven't changed since their last archive have nothing to add.
+            let fingerprint = Self.archiveFingerprint(bot.messages)
+            guard archivedFingerprints[bot.id] != fingerprint else { continue }
+            do {
+                try DailyNotes.save(bot.messages, for: bot.id)
+                archivedFingerprints[bot.id] = fingerprint
+            }
             catch { NSLog("Bot27: daily notes for %@ could not be saved: %@", bot.id.uuidString, error.localizedDescription) }
         }
+    }
+
+    /// Covers everything DailyNotes.save filters or writes on: new messages, and content
+    /// or attachments filled in after the fact (e.g. a placeholder that becomes a reply).
+    private static func archiveFingerprint(_ messages: [Message]) -> Int {
+        var hasher = Hasher()
+        for message in messages {
+            hasher.combine(message.id)
+            hasher.combine(message.content.utf8.count)
+            hasher.combine(message.images?.count)
+            hasher.combine(message.notice)
+            hasher.combine(message.job)
+            hasher.combine(message.isError)
+        }
+        return hasher.finalize()
     }
 }

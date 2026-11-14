@@ -454,10 +454,21 @@ enum DailyNotes {
 
     /// The date in local time, e.g. "2026-10-27" for "yyyy-MM-dd".
     static func stamp(_ date: Date, _ format: String) -> String {
+        (formatters[format] ?? makeFormatter(format)).string(from: date)
+    }
+
+    /// Creating a DateFormatter is slow and archiving stamps every message, so the formats
+    /// used here are built once. The dictionary is immutable, so it's safe from any thread.
+    private static let formatters = Dictionary(uniqueKeysWithValues:
+        ["yyyy-MM-dd", "HH:mm:ss"].map { ($0, makeFormatter($0)) })
+
+    private static func makeFormatter(_ format: String) -> DateFormatter {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
+        // Follow time zone changes, as a freshly created formatter would.
+        formatter.timeZone = .autoupdatingCurrent
         formatter.dateFormat = format
-        return formatter.string(from: date)
+        return formatter
     }
 
     /// The notes files for one day: the day's own file and any others named for that day.
