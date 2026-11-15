@@ -27,7 +27,7 @@
 - **Daily notes.** Main-chat messages are saved automatically by local date in `memory/YYYY-MM-DD.md`. On startup, missing messages are recovered from retained chat history, preserving existing notes without duplicates. Routines and errors are excluded. Today's and yesterday's notes are read in every chat, and the bot can search older ones.
 - **Dreaming.** Enable it in Settings → Memory to review daily notes and promote lasting facts into `MEMORY.md` at 3:00 a.m. while Bot27 is running. Missed runs catch up when the app opens.
 - **One chat per bot.** Each bot keeps one ongoing chat. Long chats are summarized instead of cut off.
-- **Tasks and routines.** One-off or scheduled jobs. Routines run in sessions of their own.
+- **Tasks and routines.** One-off or scheduled jobs, including every 1–1440 minutes with an optional time window and time zone. Windows can cross midnight: for example, every 10 minutes from 10:00 until 02:00 the next day in Asia/Shanghai. Create these in chat or edit them under Routines → Interval. The start is included and the end excluded; intervals count from each window opening, or one interval after creation/resume without a window. Bot27 must be open. Missed runs collapse into one catch-up, and windowed routines never catch up outside their running hours. Routines run in sessions of their own.
 - **Connections** (Claude and GPT). GPT uses Gmail through your ChatGPT account; Claude uses Gmail, Google Calendar and other claude.ai connectors. They are read-only, except that bots can write email drafts.
 - **Computer and browser use** (Claude and GPT). GPT browser use reuses OpenAI Computer Use from the ChatGPT desktop app; Claude uses Claude in Chrome. Off by default, and turned on per bot.
 

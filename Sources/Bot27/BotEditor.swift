@@ -314,7 +314,7 @@ struct JobsList: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(routines
-                 ? "Routines run at a set time while Bot27 is open: once, or on a repeating schedule like a morning inbox summary. If Bot27 was closed, a missed run happens once when it opens."
+                 ? "Routines run while Bot27 is open: once, on a repeating schedule, or every N minutes. Missed runs catch up once; interval routines with a time window only run within that window."
                  : "Tasks have no time. They're saved jobs you run with ▶ whenever you want; anything with a time is a routine. Each run and its reply appear in this bot's chat.")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.secondary)
@@ -454,6 +454,7 @@ struct JobEditor: View {
     private var canSave: Bool {
         !job.title.trimmingCharacters(in: .whitespaces).isEmpty
             && !job.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && job.isValidSchedule
     }
 
     var body: some View {
@@ -495,6 +496,8 @@ struct JobEditor: View {
                             ForEach([0, 15, 30, 45], id: \.self) { Text(String(format: ":%02d", $0)).tag($0) }
                         }
                         .fixedSize()
+                    case .interval:
+                        intervalControls
                     case .daily, .weekdays:
                         DatePicker("Time", selection: $job.date, displayedComponents: .hourAndMinute)
                     case .weekly:
@@ -542,12 +545,62 @@ struct JobEditor: View {
             }
         }
         .padding(22)
-        .frame(width: 420)
+        .frame(width: 500)
         .onChange(of: job.kind) {
             // Switching to "Once" shouldn't leave a time that has already passed.
             if job.kind == .once, job.date <= Date() { job.date = Date().addingTimeInterval(3600) }
+            if job.kind == .interval {
+                if job.intervalMinutes == nil { job.intervalMinutes = 10 }
+                if job.timeZoneID == nil { job.timeZoneID = TimeZone.current.identifier }
+            }
         }
         .background(Theme.bg)
+    }
+
+    private var intervalControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Every")
+                TextField("Minutes", value: Binding(get: { job.intervalMinutes ?? 10 },
+                                                     set: { job.intervalMinutes = $0 }), format: .number)
+                    .frame(width: 60)
+                Text("minutes (1–1440)")
+            }
+            Toggle("Limit running hours", isOn: Binding(get: { job.runWindow != nil }, set: { enabled in
+                job.runWindow = enabled ? .init(startMinute: 600, endMinute: 120) : nil
+            }))
+            if let window = job.runWindow {
+                HStack {
+                    DatePicker("From", selection: windowTime(start: true), displayedComponents: .hourAndMinute)
+                    DatePicker("Until", selection: windowTime(start: false), displayedComponents: .hourAndMinute)
+                }
+                .environment(\.timeZone, TimeZone(secondsFromGMT: 0)!)
+                Text(window.endMinute < window.startMinute
+                     ? "Ends the next day. The end time is excluded."
+                     : "The start is included; the end is excluded.")
+                    .font(.system(size: 11.5)).foregroundStyle(Theme.secondary)
+            }
+            TextField("Time zone (e.g. Asia/Shanghai)", text: Binding(
+                get: { job.timeZoneID ?? TimeZone.current.identifier }, set: { job.timeZoneID = $0 }))
+                .textFieldStyle(.roundedBorder)
+            if !job.isValidSchedule {
+                Text("Enter 1–1440 minutes, a valid time zone, and different start/end times.")
+                    .font(.system(size: 11.5)).foregroundStyle(.red)
+            }
+        }
+    }
+
+    /// These picker dates encode only a wall-clock time, independent of the Mac's time zone.
+    private func windowTime(start: Bool) -> Binding<Date> {
+        Binding {
+            let minute = start ? job.runWindow?.startMinute : job.runWindow?.endMinute
+            return Date(timeIntervalSinceReferenceDate: Double(minute ?? 0) * 60)
+        } set: { date in
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+            let minute = calendar.component(.hour, from: date) * 60 + calendar.component(.minute, from: date)
+            if start { job.runWindow?.startMinute = minute } else { job.runWindow?.endMinute = minute }
+        }
     }
 
     private var minute: Binding<Int> {
