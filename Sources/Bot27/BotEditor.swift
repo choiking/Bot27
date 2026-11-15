@@ -388,7 +388,7 @@ struct JobRow: View {
         HStack(alignment: .center, spacing: 10) {
             Image(systemName: job.isRoutine ? "clock.arrow.circlepath" : job.isDone ? "checkmark.circle.fill" : "checklist")
                 .font(.system(size: 14))
-                .foregroundStyle(job.isDone ? Color.green : Theme.secondary)
+                .foregroundStyle(job.isRoutine && job.enabled && !job.isDone ? Color.green : Theme.secondary)
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 2) {
                 Text(job.title.isEmpty ? "Untitled" : job.title)
