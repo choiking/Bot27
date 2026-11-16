@@ -395,40 +395,24 @@ struct NoticeCard: View {
     let message: String
 
     var body: some View {
-        if message == ChatStore.missingKeyNotice {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Bot27 needs an xAI API key").font(.system(size: 14.5, weight: .medium))
-                Text("Add your key in Settings to send messages. It's stored in your macOS Keychain.")
-                    .font(.system(size: 13.5))
-                    .foregroundStyle(Theme.secondary)
-                HStack {
-                    Spacer()
-                    SettingsLink { Text("Open Settings") }
-                        .buttonStyle(BlackCapsuleStyle())
-                }
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.warning)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Couldn't get a reply").font(.system(size: 14.5, weight: .medium))
+                Text(message).font(.system(size: 12.5)).foregroundStyle(Theme.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(4)
             }
-            .padding(14)
-            .cardStyle(radius: 16)
-        } else {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.warning)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Couldn't get a reply").font(.system(size: 14.5, weight: .medium))
-                    Text(message).font(.system(size: 12.5)).foregroundStyle(Theme.secondary)
-                        .textSelection(.enabled)
-                        .lineLimit(4)
-                }
-                Spacer(minLength: 8)
-                Button("Try again") { store.regenerate() }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 12.5, weight: .medium))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Capsule().fill(Theme.chip))
-            }
-            .padding(12)
-            .cardStyle(radius: 14)
+            Spacer(minLength: 8)
+            Button("Try again") { store.regenerate() }
+                .buttonStyle(.plain)
+                .font(.system(size: 12.5, weight: .medium))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(Theme.chip))
         }
+        .padding(12)
+        .cardStyle(radius: 14)
     }
 }
 
@@ -599,10 +583,7 @@ struct ConnectNoteCard: View {
             }
             return text
         case .requested:
-            var text = "Lets this bot \(connector?.accessText ?? "read your \(note.name)"). Nothing is sent, changed or deleted."
-            if provider == .xai {
-                text += " Also switches it to \(ModelChoice(provider: .claude, id: AppConfig.current.claudeModel).name)."
-            }
+            let text = "Lets this bot \(connector?.accessText ?? "read your \(note.name)"). Nothing is sent, changed or deleted."
             return text
         case .unavailable:
             if provider == .gpt {
@@ -861,11 +842,12 @@ struct Composer: View {
 struct ModelMenuItems: View {
     let selected: ModelChoice
     let pick: (ModelChoice) -> Void
+    @ObservedObject private var modelCatalog = ModelCatalog.shared
 
     var body: some View {
         ForEach(AppConfig.Provider.allCases, id: \.self) { provider in
             Section(provider.label) {
-                ForEach(AppConfig.models(for: provider), id: \.id) { model in
+                ForEach(modelCatalog.models(for: provider), id: \.id) { model in
                     let choice = ModelChoice(provider: provider, id: model.id)
                     Button { pick(choice) } label: {
                         if choice == selected { Label(model.name, systemImage: "checkmark") } else { Text(model.name) }

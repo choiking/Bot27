@@ -106,6 +106,10 @@ struct ClaudeCLI {
 
     func stream(_ messages: [Message]) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
+            guard !config.claudeModel.isEmpty else {
+                continuation.finish(throwing: ClaudeError.failed("Claude models are not available yet. Open the bot's settings once the model list has loaded."))
+                return
+            }
             guard let path = Self.locate(custom: config.claudePath) else {
                 continuation.finish(throwing: ClaudeError.notFound)
                 return
@@ -291,8 +295,10 @@ struct ClaudeCLI {
                 process.executableURL = URL(fileURLWithPath: path)
                 process.currentDirectoryURL = workDir
                 process.arguments = ["-p", "--output-format", "stream-json", "--verbose", "--tools", "",
-                                     "--setting-sources", "", "--no-session-persistence",
-                                     "--model", "claude-haiku-5-5"]
+                                     "--setting-sources", "", "--no-session-persistence"]
+                if !AppConfig.defaultClaudeModel.isEmpty {
+                    process.arguments? += ["--model", AppConfig.defaultClaudeModel]
+                }
                 var env = CLIEnvironment.make()
                 env["CLAUDE_CODE_DISABLE_CLAUDE_MDS"] = "1"
                 env["MCP_CONNECTION_NONBLOCKING"] = "0"

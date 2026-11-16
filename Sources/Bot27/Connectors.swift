@@ -105,8 +105,8 @@ extension Connector {
         let canUseComputer = provider.canUseComputer
         let account = provider == .gpt ? "ChatGPT" : "Claude"
         let setup = provider == .gpt ? "ChatGPT → Settings → Apps → Gmail" : "claude.ai → Settings → Connectors"
-        let catalog = catalog.filter { $0.provider == (provider == .xai ? .claude : provider) }
-        let mine = provider != .xai ? catalog.filter { $0.isConnected && bot.connections?.contains($0.id) == true } : []
+        let catalog = catalog.filter { $0.provider == provider }
+        let mine = catalog.filter { $0.isConnected && bot.connections?.contains($0.id) == true }
         let available = catalog.filter { c in c.isConnected && !mine.contains { $0.id == c.id } }
         let unset = catalog.filter { !$0.isConnected }
         var text = """
@@ -130,9 +130,7 @@ extension Connector {
         their request automatically. Use the same block for services that aren't set up yet: the user gets a link to add them. \
         Access is read-only, plus email drafts. To drop a connection: {"connector": "Gmail", "action": "disconnect"}.
         """
-        if !canUseComputer {
-            text += " Connecting also switches you to a Claude model, because connections are unavailable with xAI."
-        } else if provider == .gpt {
+        if provider == .gpt {
             text += " Gmail, computer and browser use work with your current GPT model. Only Gmail is supported as a GPT service connection."
         }
         return text

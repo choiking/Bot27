@@ -7,6 +7,9 @@ struct Bot27App: App {
         WindowGroup {
             ContentView()
                 .environmentObject(store)
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                    ModelCatalog.shared.refreshIfNeeded()
+                }
                 .preferredColorScheme(.light)
                 .frame(minWidth: 780, minHeight: 520)
         }

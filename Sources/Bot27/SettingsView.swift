@@ -5,12 +5,10 @@ struct SettingsView: View {
     @AppStorage("claudeModel") private var claudeModel = AppConfig.defaultClaudeModel
     @AppStorage("claudePath") private var claudePath = ""
     @AppStorage("gptModel") private var gptModel = AppConfig.defaultGPTModel
+    @AppStorage("gptReasoningEffort") private var gptReasoningEffort = ""
+    @ObservedObject private var modelCatalog = ModelCatalog.shared
     @AppStorage("codexPath") private var codexPath = ""
-    @AppStorage("model") private var model = AppConfig.defaultModel
-    @AppStorage("baseURL") private var baseURL = AppConfig.defaultBaseURL
     @AppStorage("systemPrompt") private var systemPrompt = AppConfig.defaultSystemPrompt
-    @State private var apiKey = Keychain.read() ?? ""
-    @State private var saved = false
 
     var body: some View {
         Form {
@@ -25,9 +23,7 @@ struct SettingsView: View {
 
             if provider == AppConfig.Provider.claude.rawValue {
                 Section {
-                    Picker("Default model", selection: $claudeModel) {
-                        ForEach(AppConfig.claudeModels, id: \.id) { Text($0.name).tag($0.id) }
-                    }
+                    CatalogModelPicker(provider: .claude, selection: $claudeModel)
                     TextField("CLI path", text: $claudePath, prompt: Text(ClaudeCLI.locate(custom: "") ?? "Not found"))
                     if let found = ClaudeCLI.locate(custom: claudePath) {
                         Label(found, systemImage: "checkmark.circle.fill")
@@ -46,9 +42,8 @@ struct SettingsView: View {
                 }
             } else if provider == AppConfig.Provider.gpt.rawValue {
                 Section {
-                    Picker("Default model", selection: $gptModel) {
-                        ForEach(AppConfig.gptModels, id: \.id) { Text($0.name).tag($0.id) }
-                    }
+                    CatalogModelPicker(provider: .gpt, selection: $gptModel)
+                    GPTReasoningPicker(title: "Default reasoning effort", model: gptModel, selection: $gptReasoningEffort)
                     TextField("CLI path", text: $codexPath, prompt: Text(CodexCLI.locate(custom: "") ?? "Not found"))
                     if let found = CodexCLI.locate(custom: codexPath) {
                         Label(found, systemImage: "checkmark.circle.fill")
@@ -73,31 +68,9 @@ struct SettingsView: View {
                     Text("Replies come from the Codex CLI on this Mac, using your ChatGPT login. Run `codex login` in Terminal once to sign in. For Gmail, connect it in ChatGPT using that same account, then refresh Connections in the bot's settings and turn Gmail on. GPT replies arrive whole rather than word by word.")
                         .foregroundStyle(.secondary)
                 }
-            } else {
-                Section {
-                    SecureField("API key", text: $apiKey, prompt: Text("xai-…"))
-                        .onChange(of: apiKey) { saved = false }
-                    HStack {
-                        Button("Save Key") {
-                            Keychain.save(apiKey)
-                            saved = true
-                        }
-                        if saved {
-                            Label("Saved to Keychain", systemImage: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                        }
-                        Spacer()
-                        Link("Get a key", destination: URL(string: "https://console.x.ai")!)
-                    }
-                    TextField("Model ID", text: $model)
-                    TextField("Base URL", text: $baseURL)
-                } header: {
-                    Text("xAI API")
-                } footer: {
-                    Text("Stored in your macOS Keychain. The XAI_API_KEY environment variable is used if no key is saved.")
-                        .foregroundStyle(.secondary)
-                }
             }
+
+            ModelCatalogStatus()
 
             NotificationSettings()
 
@@ -111,6 +84,11 @@ struct SettingsView: View {
                     .frame(height: 90)
                 Button("Reset to Default") { systemPrompt = AppConfig.defaultSystemPrompt }
             }
+        }
+        .task(id: claudePath + "|" + codexPath) {
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            modelCatalog.refreshIfNeeded()
         }
         .formStyle(.grouped)
         .frame(width: 540, height: 620)

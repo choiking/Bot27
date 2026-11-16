@@ -4,6 +4,7 @@ struct BotEditor: View {
     enum Tab: String, CaseIterable { case profile = "Profile", tasks = "Tasks", routines = "Routines", memory = "Memory" }
 
     @EnvironmentObject var store: ChatStore
+    @ObservedObject private var modelCatalog = ModelCatalog.shared
     @Environment(\.dismiss) private var dismiss
     @State var request: EditorRequest
     @State private var tab: Tab
@@ -173,6 +174,21 @@ struct BotEditor: View {
                 }
                 .fixedSize()
             }
+
+            if request.bot.modelChoice.provider == .gpt {
+                VStack(alignment: .leading, spacing: 6) {
+                    FieldLabel("Reasoning effort")
+                    GPTReasoningPicker(title: "Reasoning effort", model: request.bot.modelChoice.id,
+                                       selection: $request.bot.reasoningEffort)
+                    .labelsHidden()
+                    .fixedSize()
+                    Text("Higher effort gives the model more time to think and may use more of your usage allowance.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.secondary)
+                }
+            }
+
+            ModelCatalogStatus()
 
             ConnectionsPicker(bot: $request.bot)
 

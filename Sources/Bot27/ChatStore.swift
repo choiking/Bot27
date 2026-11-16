@@ -42,6 +42,8 @@ struct Bot: Identifiable, Codable, Equatable {
     var unread = false
     var provider: String? = nil
     var model: String? = nil
+    /// Empty or missing means use the model’s advertised default effort.
+    var gptReasoningEffort: String? = nil
     var pinned: Bool? = nil
     /// IDs of the provider-specific service connections this bot may use.
     var connections: [String]? = nil
@@ -75,6 +77,11 @@ struct Bot: Identifiable, Codable, Equatable {
     }
 
     var isPinned: Bool { pinned == true }
+
+    var reasoningEffort: String {
+        get { gptReasoningEffort ?? "" }
+        set { gptReasoningEffort = newValue.isEmpty ? nil : newValue }
+    }
 
     var modelChoice: ModelChoice {
         get {
@@ -118,8 +125,6 @@ struct EditorRequest: Identifiable {
 
 @MainActor
 final class ChatStore: ObservableObject {
-    static let missingKeyNotice = "missing-api-key"
-
     @Published var bots: [Bot] = [] {
         didSet { Notifier.shared.badge(bots.filter(\.unread).count) }
     }
@@ -163,8 +168,9 @@ final class ChatStore: ObservableObject {
         AppConfig.migrate()
         load()
         if bots.isEmpty { bots = Bot.defaults }
-        // Bots from before per-bot models start on the Settings default.
-        for i in bots.indices where bots[i].provider == nil {
+        // Older bots and removed providers move to the Settings default, keeping their history.
+        let needsProviderMigration = bots.contains { AppConfig.Provider(rawValue: $0.provider ?? "") == nil }
+        for i in bots.indices where AppConfig.Provider(rawValue: bots[i].provider ?? "") == nil {
             bots[i].modelChoice = .defaultChoice
         }
         // One-time jobs used to count as tasks; anything with a time is a routine now.
@@ -190,12 +196,14 @@ final class ChatStore: ObservableObject {
             defaults.set(true, forKey: "pinnedMainBot")
         }
         selectedID = sortedBots.first?.id
+        if needsProviderMigration { save() }
         if let data = defaults.data(forKey: "connectorCatalog"),
            let cached = try? JSONDecoder().decode([Connector].self, from: data) {
             connectors = cached.filter { $0.provider == .claude }
         }
         connectors.append(CodexConnectors.gmail(status: "checking"))
         refreshConnectors()
+        ModelCatalog.shared.refreshIfNeeded(force: true)
         ComputerRelay.shared.start()
         Notifier.shared.open = { [weak self] id in self?.select(id) }
         Notifier.shared.isShowing = { [weak self] id in NSApp.isActive && self?.selectedID == id }
@@ -250,7 +258,7 @@ final class ChatStore: ObservableObject {
     }
 
     func connectorCatalog(for provider: AppConfig.Provider) -> [Connector] {
-        connectors.filter { $0.provider == (provider == .xai ? .claude : provider) }
+        connectors.filter { $0.provider == provider }
     }
 
     /// Sidebar order: pinned bots first, each group most recent first.
@@ -275,6 +283,7 @@ final class ChatStore: ObservableObject {
         let color = Theme.avatarColors.indices.first { !used.contains($0) } ?? Int.random(in: 0..<Theme.avatarColors.count)
         var bot = Bot(name: "", instructions: "", shape: Int.random(in: 0..<Theme.avatarShapes), color: color)
         bot.modelChoice = .defaultChoice
+        bot.gptReasoningEffort = AppConfig.current.gptReasoningEffort
         editor = EditorRequest(bot: bot, isNew: true)
     }
 
@@ -295,6 +304,7 @@ final class ChatStore: ObservableObject {
                 $0.shape = request.bot.shape
                 $0.color = request.bot.color
                 $0.modelChoice = request.bot.modelChoice
+                $0.reasoningEffort = request.bot.reasoningEffort
                 $0.connections = request.bot.connections
                 $0.computerUse = request.bot.computerUse
                 $0.browserUse = request.bot.browserUse
@@ -348,6 +358,7 @@ final class ChatStore: ObservableObject {
             return
         }
         var config = AppConfig.current.with(Compaction.model(for: bot.modelChoice))
+        config.gptReasoningEffort = bot.reasoningEffort
         config.systemPrompt = Dreaming.instructions(bot: id)
         let input = [Message(role: .user, content: "Recent daily notes:\n\n" + notes)]
         dreaming.insert(id)
@@ -382,7 +393,6 @@ final class ChatStore: ObservableObject {
             switch config.provider {
             case .claude: replies = ClaudeCLI(config: config).stream(input)
             case .gpt: replies = CodexCLI(config: config).stream(input)
-            case .xai: replies = XAIClient(config: config).stream(input)
             }
             for try await delta in replies { text += delta }
         } catch {
@@ -554,9 +564,6 @@ final class ChatStore: ObservableObject {
         mutate(botID) { bot in
             if bot.connections?.contains(connectorID) != true {
                 bot.connections = (bot.connections ?? []) + [connectorID]
-            }
-            if bot.modelChoice.provider == .xai {
-                bot.modelChoice = ModelChoice(provider: .claude, id: AppConfig.current.claudeModel)
             }
             // A previously unavailable request may have no ID, or an ID from the old provider.
             if let m = bot.messages.firstIndex(where: { $0.id == messageID }) {
@@ -749,10 +756,9 @@ final class ChatStore: ObservableObject {
         moveToTop(id)
 
         var config = AppConfig.current.with(bot.modelChoice)
+        config.gptReasoningEffort = bot.reasoningEffort
         let catalog = connectorCatalog(for: config.provider)
-        let enabled = config.provider != .xai
-            ? catalog.filter { $0.isConnected && bot.connections?.contains($0.id) == true }
-            : []
+        let enabled = catalog.filter { $0.isConnected && bot.connections?.contains($0.id) == true }
         var connectionNote = ""
         if !enabled.isEmpty {
             connectionNote = "You can look things up in the user's \(enabled.map(\.name).joined(separator: ", ")). "
@@ -778,12 +784,6 @@ final class ChatStore: ObservableObject {
                                BotJob.clock()]
             .filter { !$0.isEmpty }
             .joined(separator: "\n\n")
-        guard config.provider != .xai || config.apiKey != nil else {
-            finishLast(in: id, error: Self.missingKeyNotice)
-            save()
-            return
-        }
-
         streaming.insert(id)
         if useComputer { computerRuns.insert(id) }
         tasks[id] = Task { [weak self] in
@@ -817,7 +817,6 @@ final class ChatStore: ObservableObject {
                     replies = CodexCLI(config: config, connectors: enabled, onActivity: onActivity, computerUse: useComputer,
                                        onComputer: onComputer, browserUse: useBrowser,
                                        onBrowser: onBrowser).stream(history)
-                case .xai: replies = XAIClient(config: config).stream(history)
                 }
                 for try await delta in replies {
                     self?.mutate(id) { bot in
@@ -865,6 +864,7 @@ final class ChatStore: ObservableObject {
         let older = Array(recent[..<cut])
         guard let through = older.last?.id else { return }
         var config = AppConfig.current.with(Compaction.model(for: bot.modelChoice))
+        config.gptReasoningEffort = bot.reasoningEffort
         config.systemPrompt = Compaction.instructions(bot: id)
         let input = [Message(role: .user, content: Compaction.prompt(summary: bot.hasSummary ? bot.summary : nil,
                                                                      messages: older))]

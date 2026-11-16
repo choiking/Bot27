@@ -97,6 +97,10 @@ struct CodexCLI {
 
     func stream(_ messages: [Message]) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
+            guard !config.gptModel.isEmpty else {
+                continuation.finish(throwing: ClaudeError.failed("GPT models are not available yet. Open the bot's settings once the model list has loaded."))
+                return
+            }
             guard let path = Self.locate(custom: config.codexPath) else {
                 continuation.finish(throwing: ClaudeError.failed(
                     "Couldn't find the codex CLI. Install Codex and sign in with ChatGPT, or set its path in Settings."))
@@ -121,8 +125,8 @@ struct CodexCLI {
             // installed OpenAI plugin, so no unrelated personal plugins/MCP servers are inherited.
             let disabledFeatures = ["shell_tool", "plugins", "computer_use", "browser_use",
                                     "browser_use_external", "in_app_browser"]
-            process.arguments = ["exec", "--json", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "-s", "read-only",
-                                 "-m", config.gptModel, "-c", "model_reasoning_effort=low"]
+            process.arguments = ["exec", "--json", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "-s", "read-only"]
+                + CodexModels.arguments(model: config.gptModel, effort: config.gptReasoningEffort)
                 + disabledFeatures.flatMap { ["-c", "features.\($0)=false"] }
                 + CodexConnectors.arguments(for: connectors)
                 + toolArgs

@@ -363,9 +363,9 @@ enum Compaction {
         return messages.count - kept > 0 ? messages.count - kept : nil
     }
 
-    /// A cheaper model for summaries where the provider has one.
+    /// Keep the bot's selected catalog model for background memory work too.
     static func model(for choice: ModelChoice) -> ModelChoice {
-        choice.provider == .claude ? ModelChoice(provider: .claude, id: "claude-haiku-5-5") : choice
+        choice
     }
 
     static func instructions(bot: UUID) -> String {

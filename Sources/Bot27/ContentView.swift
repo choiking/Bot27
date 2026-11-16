@@ -196,11 +196,7 @@ struct ConnectionsPicker: View {
                 .foregroundStyle(Theme.secondary)
                 .help("Refresh connectors")
             }
-            if bot.modelChoice.provider == .xai {
-                Text("Connections work with Claude and GPT models.")
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(Theme.secondary)
-            } else if store.connectorCatalog(for: bot.modelChoice.provider).isEmpty {
+            if store.connectorCatalog(for: bot.modelChoice.provider).isEmpty {
                 Text("No connectors yet. Add Gmail, Notion and more at claude.ai → Settings → Connectors.")
                     .font(.system(size: 12.5))
                     .foregroundStyle(Theme.secondary)
