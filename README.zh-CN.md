@@ -4,7 +4,7 @@
 
 [English](README.md)
 
-**一个更好用、而且免费的 Grok Bot。**
+**一个免费、开源的个人 bot。使用你自己的模型，部署在你自己的电脑上。**
 
 <p align="center"><img src="demo.gif" alt="Bot27 演示" width="360"></p>
 

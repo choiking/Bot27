@@ -4,7 +4,7 @@
 
 [中文](README.zh-CN.md)
 
-**A better, free Grok Bot.**
+**A free, open-source personal bot. Use your own model and host it on your own PC.**
 
 <p align="center"><img src="demo.gif" alt="Bot27 demo" width="360"></p>
 
