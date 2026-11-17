@@ -5,6 +5,7 @@ Uses an in-memory store and simple measurable message rows, so no user data,
 model requests, notifications, or scheduled jobs are touched.
 """
 from pathlib import Path
+import platform
 import subprocess
 import tempfile
 
@@ -141,8 +142,14 @@ with tempfile.TemporaryDirectory(prefix="bot27-transcript-test-") as directory:
     (tmp / "ChatLayout.swift").write_text(source.split("// MARK: - Messages", 1)[0])
     (tmp / "Harness.swift").write_text(HARNESS)
     binary = tmp / "check"
+    sdk_platform = Path(subprocess.check_output(
+        ["xcrun", "--sdk", "macosx", "--show-sdk-platform-path"], text=True).strip())
+    plugins = sdk_platform / "Developer/usr/lib/swift/host/plugins"
+    plugin_args = ["-plugin-path", str(plugins)] if plugins.is_dir() else []
     subprocess.run([
-        "swiftc", "-parse-as-library", "-module-cache-path", str(tmp / "modules"),
+        "swiftc", "-parse-as-library", "-target", f"{platform.machine()}-apple-macosx14.0",
+        "-module-cache-path", str(tmp / "modules"),
+        *plugin_args,
         str(tmp / "ChatLayout.swift"), str(ROOT / "Sources/Bot27/Theme.swift"),
         str(tmp / "Harness.swift"), "-o", str(binary),
     ], check=True)

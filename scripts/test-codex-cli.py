@@ -13,6 +13,7 @@ struct AppConfig {
     enum Provider: String { case claude, gpt, xai; var canUseComputer: Bool { self != .xai } }
     var codexPath: String
     var gptModel = "test-model"
+    var gptReasoningEffort: String? = nil
     var claudePath = ""
     var systemPrompt = "test"
 }
@@ -249,6 +250,7 @@ with tempfile.TemporaryDirectory(prefix="bot27-codex-test-") as directory:
     subprocess.run([
         "swiftc", "-parse-as-library", "-enable-bare-slash-regex", "-module-cache-path", str(tmp / "modules"),
         str(ROOT / "Sources/Bot27/CodexCLI.swift"),
+        str(ROOT / "Sources/Bot27/CodexModels.swift"),
         str(ROOT / "Sources/Bot27/CodexConnectors.swift"),
         str(ROOT / "Sources/Bot27/Connectors.swift"),
         str(ROOT / "Sources/Bot27/NativeBrowser.swift"),
