@@ -1,3 +1,5 @@
+<p align="center"><img src="Resources/AppIcon.png" alt="Bot27 logo" width="128" height="128"></p>
+
 # Bot27
 
 [中文](README.zh-CN.md)
