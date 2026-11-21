@@ -178,6 +178,7 @@ struct CodexCLI {
                     var replies = 0
                     var lastError: String?
                     var turnFailed = false
+                    var turnCompleted = false
                     for try await line in stdout.fileHandleForReading.bytes.lines {
                         guard let event = try? JSONDecoder().decode(Event.self, from: Data(line.utf8)) else { continue }
                         if event.type == "item.started", event.item?.type == "mcp_tool_call",
@@ -193,6 +194,8 @@ struct CodexCLI {
                             onActivity?("")
                             continuation.yield(replies == 0 ? text : "\n\n" + text)
                             replies += 1
+                        } else if event.type == "turn.completed" {
+                            turnCompleted = true
                         } else if event.type == "turn.failed" {
                             turnFailed = true
                             lastError = Self.readable(event.error?.message ?? "Codex request failed.")
@@ -202,7 +205,9 @@ struct CodexCLI {
                     }
                     process.waitUntilExit()
                     let stderrText = await diagnostics.value
-                    if inputError != nil || turnFailed || process.terminationStatus != 0 || replies == 0 {
+                    // A completed turn can intentionally have nothing to report.
+                    // An empty event stream without completion is still an error.
+                    if inputError != nil || turnFailed || process.terminationStatus != 0 || (replies == 0 && !turnCompleted) {
                         let detail = lastError ?? (stderrText.isEmpty
                             ? (inputError?.localizedDescription ?? "GPT exited without a reply.") : stderrText)
                         let safeDetail = computerUse

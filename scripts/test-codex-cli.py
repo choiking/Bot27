@@ -213,6 +213,18 @@ if mode == "json":
     sys.exit(1)
 if mode == "empty":
     sys.exit(0)
+if mode in ("silent", "silent_failed", "silent_nonzero", "empty_message", "malformed"):
+    if mode == "malformed":
+        print('{"type":"turn.completed"')
+        sys.exit(0)
+    if mode == "empty_message":
+        print(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": ""}}))
+    if mode == "silent_failed":
+        print(json.dumps({"type": "turn.failed", "error": {"message": "test turn failure"}}))
+    if mode == "silent_nonzero":
+        sys.stderr.write("test process failure\n")
+    print(json.dumps({"type": "turn.completed"}))
+    sys.exit(2 if mode == "silent_nonzero" else 0)
 if mode in ("mcp_config", "browser_config", "both_tools"):
     for server, tool in ([("computer", "screenshot")] if computer else []) + ([("cua_repl", "js")] if browser else []):
         print(json.dumps({"type": "item.started", "item": {"type": "mcp_tool_call", "server": server, "tool": tool}}))
@@ -273,6 +285,11 @@ with tempfile.TemporaryDirectory(prefix="bot27-codex-test-") as directory:
         "stderr": "test authentication failure",
         "json": "FAILURE: Codex (exit 1): test model unavailable",
         "empty": "FAILURE: Codex (exit 0): GPT exited without a reply.",
+        "silent": "SUCCESS: \n",
+        "empty_message": "SUCCESS: \n",
+        "silent_failed": "FAILURE: Codex (exit 0): test turn failure",
+        "silent_nonzero": "FAILURE: Codex (exit 2): test process failure",
+        "malformed": "FAILURE: Codex (exit 0): GPT exited without a reply.",
         "partial_reply": "FAILURE: Codex (exit 1): test failure after partial reply",
         "mcp_config": "SUCCESS: OK",
         "browser_config": "SUCCESS: OK",

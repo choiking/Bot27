@@ -841,8 +841,23 @@ final class ChatStore: ObservableObject {
                 self.respond(in: id, isolated: isolated)
                 return
             }
-            if let bot = self.bots.first(where: { $0.id == id }) { Notifier.shared.replied(bot: bot) }
-            if self.selectedID != id { self.mutate(id) { $0.unread = true } }
+            var silent = false
+            self.mutate(id) { bot in
+                // Remove an empty reply placeholder without notifying. Keep errors
+                // and action cards even when they have no accompanying text.
+                if let last = bot.messages.last, last.role == .assistant,
+                   last.isError != true, last.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   last.images?.isEmpty != false, last.jobNotes?.isEmpty != false,
+                   last.connectNotes?.isEmpty != false, last.memoryNotes?.isEmpty != false,
+                   last.notice == nil {
+                    bot.messages.removeLast()
+                    silent = true
+                }
+            }
+            if !silent {
+                if let bot = self.bots.first(where: { $0.id == id }) { Notifier.shared.replied(bot: bot) }
+                if self.selectedID != id { self.mutate(id) { $0.unread = true } }
+            }
             self.save()
             self.compactIfNeeded(id)
         }
